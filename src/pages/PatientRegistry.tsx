@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
 import {
-  Users, Plus, Edit, Trash2, Search, X, AlertCircle, CheckCircle2, Loader2,
+  Users, Plus, Edit, Trash2, Search, X, AlertCircle, CheckCircle2, Loader2, Eye,
   HeartPulse, Dna, ScanLine, GitBranch, Activity, ShieldCheck,
 } from 'lucide-react';
 import {
@@ -374,6 +375,7 @@ export default function PatientRegistry() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [editing, setEditing] = useState<PatientRecord | null>(null);
+  const navigate = useNavigate();
   const [formInitial, setFormInitial] = useState<PatientInput>(DEFAULT_INPUT);
   const [submitting, setSubmitting] = useState(false);
 
@@ -411,6 +413,16 @@ export default function PatientRegistry() {
   }, []);
 
   useEffect(() => { void fetchPatients(); }, [fetchPatients]);
+
+  // ── Supabase realtime: auto-refresh on any change ──
+  useEffect(() => {
+    const channel = supabase
+      .channel('patients-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'patients' },
+        () => { void fetchPatients(); })
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [fetchPatients]);
 
   // ── Filter + sort ──
   const filtered = useMemo(() => {
@@ -465,6 +477,13 @@ export default function PatientRegistry() {
     setFormInitial(DEFAULT_INPUT);
     setModalOpen(true);
   }, []);
+
+  // ── Listen for command palette "register patient" event ──
+  useEffect(() => {
+    const handler = () => openCreate();
+    window.addEventListener('aegisonco:register-patient', handler);
+    return () => window.removeEventListener('aegisonco:register-patient', handler);
+  }, [openCreate]);
 
   // ── Open edit modal ──
   const openEdit = useCallback((p: PatientRecord) => {
@@ -743,7 +762,7 @@ export default function PatientRegistry() {
                                 <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-200 flex items-center justify-center shrink-0">
                                   <Users size={14} className="text-blue-500" />
                                 </div>
-                                <span className="font-mono-data text-[12px] font-bold text-slate-800">{p.patient_code}</span>
+                                <span className="font-mono-data text-[12px] font-bold text-slate-800 hover:text-violet-600 cursor-pointer transition-colors" onClick={() => navigate(`/registry/${p.id}`)}>{p.patient_code}</span>
                               </div>
                             </td>
                             <td className="px-4 py-4 text-left">
@@ -773,6 +792,14 @@ export default function PatientRegistry() {
                             </td>
                             <td className="px-5 py-4">
                               <div className="flex items-center justify-end gap-2">
+                                <motion.button
+                                  whileTap={{ scale: 0.92 }} whileHover={{ scale: 1.08 }}
+                                  onClick={() => navigate(`/registry/${p.id}`)}
+                                  className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 hover:bg-blue-100 transition-colors"
+                                  title="View Detail"
+                                >
+                                  <Eye size={14} />
+                                </motion.button>
                                 <motion.button
                                   whileTap={{ scale: 0.92 }} whileHover={{ scale: 1.08 }}
                                   onClick={() => openEdit(p)}
@@ -852,6 +879,12 @@ export default function PatientRegistry() {
                         </div>
 
                         <div className="flex items-center gap-2 pt-3 border-t border-slate-200/60">
+                          <button
+                            onClick={() => navigate(`/registry/${p.id}`)}
+                            className="flex-1 py-2.5 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center gap-2 text-[11px] font-bold text-blue-600 hover:bg-blue-100 transition-colors"
+                          >
+                            <Eye size={13} /> View
+                          </button>
                           <button
                             onClick={() => openEdit(p)}
                             className="flex-1 py-2.5 rounded-xl bg-violet-50 border border-violet-200 flex items-center justify-center gap-2 text-[11px] font-bold text-violet-600 hover:bg-violet-100 transition-colors"

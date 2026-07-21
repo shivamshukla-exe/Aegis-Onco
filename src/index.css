@@ -221,3 +221,81 @@ input[type='range'].aegis-slider-emerald::-moz-range-thumb {
   background: currentColor;
   animation: pulse-ring 2.5s ease-out infinite;
 }
+
+/* ── Dark mode ── */
+.dark {
+  color-scheme: dark;
+}
+.dark body {
+  background-color: #0a0a14;
+}
+.dark .mesh-bg {
+  background-color: #0a0a14;
+  background-image:
+    radial-gradient(at 18% 12%, rgba(139, 92, 246, 0.18) 0px, transparent 50%),
+    radial-gradient(at 82% 8%, rgba(236, 72, 153, 0.12) 0px, transparent 50%),
+    radial-gradient(at 75% 85%, rgba(16, 185, 129, 0.10) 0px, transparent 50%),
+    radial-gradient(at 12% 78%, rgba(59, 130, 246, 0.10) 0px, transparent 50%);
+}
+.dark .glass-card {
+  background: rgba(20, 20, 35, 0.72);
+  border: 1px solid rgba(139, 92, 246, 0.15);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 10px 40px -8px rgba(0, 0, 0, 0.4);
+}
+.dark .glass-card-violet {
+  background: rgba(20, 20, 35, 0.72);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 10px 40px -8px rgba(139, 92, 246, 0.2);
+}
+.dark .glass-card-emerald {
+  background: rgba(20, 20, 35, 0.72);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 10px 40px -8px rgba(16, 185, 129, 0.2);
+}
+.dark .glass-card-rose {
+  background: rgba(20, 20, 35, 0.72);
+  border: 1px solid rgba(244, 63, 94, 0.25);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 10px 40px -8px rgba(244, 63, 94, 0.2);
+}
+.dark .glass-card-amber {
+  background: rgba(20, 20, 35, 0.72);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 10px 40px -8px rgba(245, 158, 11, 0.2);
+}
+.dark .text-slate-800 { color: #e2e8f0; }
+.dark .text-slate-700 { color: #cbd5e1; }
+.dark .text-slate-600 { color: #94a3b8; }
+.dark .text-slate-500 { color: #64748b; }
+.dark .text-slate-400 { color: #475569; }
+.dark .bg-slate-100\/80 { background: rgba(30, 30, 50, 0.8); }
+.dark .bg-slate-100\/60 { background: rgba(30, 30, 50, 0.6); }
+.dark .bg-white\/80 { background: rgba(20, 20, 35, 0.8); }
+.dark .bg-white\/60 { background: rgba(20, 20, 35, 0.6); }
+.dark .bg-white\/40 { background: rgba(20, 20, 35, 0.4); }
+.dark .border-slate-200\/40 { border-color: rgba(139, 92, 246, 0.12); }
+.dark .border-slate-200\/60 { border-color: rgba(139, 92, 246, 0.15); }
+.dark .border-slate-200 { border-color: rgba(139, 92, 246, 0.15); }
+.dark .border-slate-300 { border-color: rgba(139, 92, 246, 0.2); }
+.dark .recharts-default-tooltip {
+  background: rgba(20, 20, 35, 0.98) !important;
+  border: 1px solid rgba(139, 92, 246, 0.3) !important;
+  box-shadow: 0 10px 40px -8px rgba(0, 0, 0, 0.5) !important;
+}
+.dark .recharts-cartesian-grid line {
+  stroke: rgba(139, 92, 246, 0.08) !important;
+}
+.dark .recharts-cartesian-axis-tick-value {
+  fill: #64748b !important;
+}
+.dark ::-webkit-scrollbar-thumb { background: rgba(139, 92, 246, 0.35); }
+.dark ::-webkit-scrollbar-thumb:hover { background: rgba(139, 92, 246, 0.55); }
+.dark input[type='range'].aegis-slider {
+  background: linear-gradient(to right, #8b5cf6 0%, #8b5cf6 var(--val, 50%), rgba(30, 30, 50, 0.8) var(--val, 50%), rgba(30, 30, 50, 0.8) 100%);
+}
+.dark input[type='range'].aegis-slider-rose {
+  background: linear-gradient(to right, #f43f5e 0%, #f43f5e var(--val, 50%), rgba(30, 30, 50, 0.8) var(--val, 50%), rgba(30, 30, 50, 0.8) 100%);
+}
+.dark input[type='range'].aegis-slider-emerald {
+  background: linear-gradient(to right, #10b981 0%, #10b981 var(--val, 50%), rgba(30, 30, 50, 0.8) var(--val, 50%), rgba(30, 30, 50, 0.8) 100%);
+}
+.dark select option { background: #14142a; }

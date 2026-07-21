@@ -4,11 +4,7 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="%BASE_URL%vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!--
-      GitHub Pages SPA fallback (paired with public/404.html), see
-      https://github.com/rafgraph/spa-github-pages. Restores the real URL
-      that the 404 page redirected through, before React Router mounts.
-    -->
+    <!-- GitHub Pages SPA fallback: restores deep-link URL from 404.html redirect -->
     <script>
       (function (l) {
         if (l.search[1] === '/') {

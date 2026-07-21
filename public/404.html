@@ -3,17 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <title>AegisOnco Command Center</title>
-    <!--
-      GitHub Pages SPA fallback (standard technique, see
-      https://github.com/rafgraph/spa-github-pages).
-      GitHub Pages serves this file for any unknown path (e.g. a deep link or
-      a hard refresh on /Aegis-Onco/registry). It re-encodes the intended
-      path into a query string and redirects to index.html, which then
-      restores the real URL via history.replaceState so React Router can
-      render the correct page.
-    -->
+    <!-- GitHub Pages SPA fallback: preserves the deep-link path through a redirect -->
     <script>
-      var pathSegmentsToKeep = 1; // keep "/Aegis-Onco"
+      var pathSegmentsToKeep = 1;
       var l = window.location;
       l.replace(
         l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +

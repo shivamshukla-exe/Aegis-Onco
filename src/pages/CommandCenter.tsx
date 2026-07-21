@@ -21,6 +21,8 @@ import {
   STAGES, CELLULARITIES, INTERVENTIONS, DEFAULT_INPUT,
 } from '../lib/types';
 import { runFullEngine, type EngineResult, FEDERATED_NODES } from '../lib/engine';
+import DataPipeline from '../components/DataPipeline';
+import TumorVisualization from '../components/TumorVisualization';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Custom Tooltip — local to this page
@@ -238,6 +240,33 @@ export default function CommandCenter() {
           </div>
         </div>
       </PageHeader>
+
+      {/* ── Animated Data Pipeline Hero ── */}
+      <DataPipeline />
+
+      {/* ── 3D Tumor Visualization ── */}
+      <motion.section initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, ease: 'easeOut' }}
+        className="glass-card-violet rounded-3xl overflow-hidden mb-5">
+        <div className="flex items-center justify-between px-5 pt-4 pb-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-violet-50 border border-violet-200 flex items-center justify-center glow-violet">
+              <Brain className="text-violet-600" size={16} />
+            </div>
+            <div>
+              <h3 className="text-[13px] font-bold text-slate-800">3D Digital Twin · Tumor Morphology</h3>
+              <p className="text-[9px] text-slate-400 font-mono-data uppercase tracking-[0.18em] mt-0.5">Real-time Volumetric Render · Drag to Rotate</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-[10px] font-mono-data">
+            <span className="px-2.5 py-1 rounded-lg bg-violet-50 border border-violet-200 text-violet-600 font-bold">{tumorSize}mm</span>
+            <span className="px-2.5 py-1 rounded-lg bg-rose-50 border border-rose-200 text-rose-500 font-bold">{stage}</span>
+            <span className="px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-600 font-bold">{lymphNodes} nodes</span>
+          </div>
+        </div>
+        <div className="h-[400px] w-full">
+          <TumorVisualization tumorSize={tumorSize} stage={stage} lymphNodes={lymphNodes} />
+        </div>
+      </motion.section>
 
       {/* ─────────────────────────────────────────────────────────────────── */}
       {/* Main Grid — 340px left controls / 1fr right analytics               */}

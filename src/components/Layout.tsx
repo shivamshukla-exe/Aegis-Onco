@@ -2,9 +2,11 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ShieldCheck, LayoutDashboard, Users, Dna, Server, GitCompare,
-  BarChart3, Lock, Wifi, Server as ServerIcon,
+  BarChart3, Lock, Wifi, Server as ServerIcon, Command,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { DarkModeToggle } from './DarkMode';
+import { useCommandPalette } from './CommandPalette';
 
 const NAV_ITEMS = [
   { path: '/', label: 'Command Center', icon: LayoutDashboard, accent: 'violet' },
@@ -27,6 +29,7 @@ const ACCENT_DOT: Record<string, string> = {
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const [now, setNow] = useState(new Date());
+  const commandPalette = useCommandPalette();
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 1000);
@@ -91,8 +94,19 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             ))}
           </nav>
 
+          {/* Command palette hint + dark mode */}
+          <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-200/40">
+            <button onClick={() => commandPalette.setOpen(true)}
+              className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-slate-100/60 border border-slate-200/40 hover:border-violet-300 hover:bg-violet-50 transition-all group">
+              <Command size={12} className="text-slate-400 group-hover:text-violet-500" />
+              <span className="text-[9px] text-slate-400 font-mono-data group-hover:text-violet-500">Quick Search</span>
+              <kbd className="ml-auto text-[8px] font-mono-data text-slate-400 bg-white/60 border border-slate-200/40 rounded px-1 py-0.5">⌘K</kbd>
+            </button>
+            <DarkModeToggle />
+          </div>
+
           {/* Status footer */}
-          <div className="space-y-2 pt-4 border-t border-slate-200/40">
+          <div className="space-y-2 pt-4 mt-3 border-t border-slate-200/40">
             <div className="flex items-center gap-2 px-2">
               <Lock className="text-emerald-500" size={12} />
               <span className="text-[9px] text-emerald-600 font-bold uppercase tracking-wider">HIPAA Validated</span>
