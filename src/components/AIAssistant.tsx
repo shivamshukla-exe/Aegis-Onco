@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Brain, X, Send, Sparkles, Activity, Stethoscope } from 'lucide-react';
-import { runFullEngine, computeLogHazard } from '../lib/engine';
+import { Brain, X, Send, Sparkles } from 'lucide-react';
+import { runFullEngine } from '../lib/engine';
 import {
   DEFAULT_INPUT,
   INTERVENTIONS,
@@ -25,10 +25,10 @@ interface ChatMessage {
 
 interface ComparisonRow {
   intervention: Intervention;
-  meanHazard: number;
-  medianOS: number | null;
-  s1095: number;
-  s2000: number;
+  surrogateScore: number;
+  medianDemoDay: number | null;
+  day1095DemoSurvival: number;
+  day2000DemoSurvival: number;
 }
 
 interface ParsedParams {
@@ -180,111 +180,70 @@ function describeParams(params: ParsedParams): string {
   return parts.join(', ');
 }
 
-function prognosisLabel(meanHazard: number): string {
-  if (meanHazard < 0.5) return 'favorable';
-  if (meanHazard < 1.2) return 'moderate';
-  if (meanHazard < 2.0) return 'guarded';
-  return 'poor';
-}
-
-function generatePrognosisResponse(params: ParsedParams): string {
+function generateScenarioResponse(params: ParsedParams): string {
   const input = buildInput(params);
   const result = runFullEngine(input);
-  const desc = describeParams(params);
-  const label = prognosisLabel(result.meanHazard);
-
-  // Compute hazard reduction of Double-Agent Cocktail vs. current intervention.
-  const cocktailInput: PatientInput = { ...input, intervention: 'Double-Agent Cocktail' };
-  const cocktailHazard = computeLogHazard(cocktailInput);
-  const baseHazard = result.baseLogHazard;
-  const reductionPct = baseHazard > 0
-    ? Math.round(((baseHazard - cocktailHazard) / baseHazard) * 100)
-    : 0;
-  const reductionStr = reductionPct > 0
-    ? `could reduce the hazard by approximately ${reductionPct}%`
-    : 'shows limited additional hazard reduction for this profile';
-
+  const desc = describeParams(params) || 'default synthetic inputs';
   const medianStr = result.medianDay !== null
-    ? `~${Math.round(result.medianDay).toLocaleString()} days`
-    : 'not reached within the model horizon';
+    ? `${Math.round(result.medianDay).toLocaleString()} demo days`
+    : 'not reached within the synthetic curve horizon';
 
-  return `Based on the parameters you provided (${desc}), here's the model's projection:
+  return `For the synthetic inputs (${desc}), the deterministic UI surrogate produces:
 
-• Mean Log-Hazard: ${result.meanHazard.toFixed(2)}
-• Uncertainty (σ): ${result.uncertaintyStd.toFixed(2)}
-• Median Overall Survival: ${medianStr}
-• 3-Year Survival Probability: ${Math.round(result.s1095)}%
-• 5-Year Survival Probability: ${Math.round(result.s2000)}%
+• Surrogate score: ${result.meanSurrogateScore.toFixed(2)}
+• Seeded variation (σ): ${result.variationStd.toFixed(2)}
+• Synthetic median-curve point: ${medianStr}
+• Day-1095 synthetic curve value: ${Math.round(result.s1095)}%
+• Day-2000 synthetic curve value: ${Math.round(result.s2000)}%
 
-Under ${input.intervention}, the prognosis is ${label}. The Double-Agent Cocktail intervention ${reductionStr}. Would you like to see a detailed comparison?`;
+These values come from hand-authored browser equations, not notebook weights, clinical evidence, a prognosis model, or a treatment-effect estimator. They must not guide diagnosis or therapy.`;
 }
 
 function generateComparisonResponse(params: ParsedParams): { text: string; rows: ComparisonRow[] } {
   const baseInput = buildInput(params);
   const rows: ComparisonRow[] = INTERVENTIONS.map((intervention) => {
     const input: PatientInput = { ...baseInput, intervention };
-    const r = runFullEngine(input);
+    const result = runFullEngine(input);
     return {
       intervention,
-      meanHazard: r.meanHazard,
-      medianOS: r.medianDay,
-      s1095: r.s1095,
-      s2000: r.s2000,
+      surrogateScore: result.meanSurrogateScore,
+      medianDemoDay: result.medianDay,
+      day1095DemoSurvival: result.s1095,
+      day2000DemoSurvival: result.s2000,
     };
   });
 
-  const desc = describeParams(params);
-  const best = rows.reduce((a, b) => (b.meanHazard < a.meanHazard ? b : a), rows[0]);
-  const worst = rows.reduce((a, b) => (b.meanHazard > a.meanHazard ? b : a), rows[0]);
+  const desc = describeParams(params) || 'default synthetic inputs';
+  const text = `Here is a non-causal sensitivity table for ${desc}.
 
-  const text = `Here's a treatment comparison for ${desc}:
-
-The model projects **${best.intervention}** as the most favorable option (lowest mean log-hazard ${best.meanHazard.toFixed(2)}), while **${worst.intervention}** carries the highest projected hazard (${worst.meanHazard.toFixed(2)}).
-
-Review the table below for survival probabilities across interventions.`;
+Each named scenario applies an arbitrary offset to the same browser surrogate. Lower or higher numbers do not indicate treatment benefit, comparative effectiveness, or a recommendation. The displayed curve values are synthetic UI outputs.`;
 
   return { text, rows };
 }
 
 function generateCapabilityResponse(): string {
-  return `I'm Aegis AI, your clinical prognostic assistant. I can analyze patient parameters and project outcomes using the AegisOnco prognostic engine.
+  return `I'm Aegis AI, a scripted assistant for this synthetic research UI. I can parse demo inputs and explain the deterministic browser surrogate.
 
-I understand natural-language clinical descriptions. Try mentioning any of:
-• **Age** — e.g. "55yo" or "55 year old"
-• **Stage** — e.g. "Stage II", "stage IV"
-• **Receptor status** — e.g. "ER+", "HER2-", "PR positive"
-• **Tumor size** — e.g. "tumor 30mm"
-• **Treatment** — "standard", "targeted", or "cocktail"
+Try mentioning any of:
+• **Age** — e.g. "55yo"
+• **Stage field** — e.g. "Stage II"
+• **Receptor field** — e.g. "ER+"
+• **Tumor-size field** — e.g. "30mm"
+• **Scenario label** — "standard", "targeted", or "cocktail"
 
-Ask me to **compare treatments** for a given patient, or request a prognosis like:
-*"What's the prognosis for a 55yo Stage II ER+ patient with a 30mm tumor?"*`;
+I can show non-causal scenario sensitivity, but I cannot provide a diagnosis, prognosis, treatment effect, or medical recommendation.`;
 }
 
 function generateFactorsResponse(): string {
-  return `The AegisOnco prognostic engine weighs multiple clinical and molecular factors when computing log-hazard:
+  return `The browser surrogate uses hand-authored coefficients for interface demonstration only.
 
-**Clinical**
-• Age — older age increases baseline hazard
-• Tumor size — larger tumors elevate risk
-• Lymph node involvement — a strong adverse factor
-• NPI (Nottingham Prognostic Index) — composite staging score
-• Stage (0–IV) — the dominant anatomical driver
-• Grade — higher grade worsens outcome
-• Cellularity — high cellularity adds modest risk
+**Synthetic input groups**
+• Age, tumor size, lymph-node count, NPI, stage field, grade, and cellularity
+• TP53, EGFR, KRAS, and MYC demo expression values
+• Mutation count and receptor-status fields
+• A named scenario offset
 
-**Molecular**
-• TP53, EGFR, KRAS, MYC expression — each adds weighted hazard
-• Mutation count — burden scales risk
-• ER positive — protective (−0.25)
-• PR positive — protective (−0.15)
-• HER2 positive — adverse (+0.20)
-
-**Intervention**
-• Standard Clinical Routine — baseline
-• Targeted Kinase Inhibition — reduces hazard by ~0.9
-• Double-Agent Cocktail — reduces hazard by ~1.5 (with slightly higher uncertainty)
-
-Ask me to run a projection or compare treatments for a specific patient.`;
+The coefficients are not fitted METABRIC model weights and have no clinical interpretation. Scenario offsets are arbitrary and do not represent treatment benefit. Use the Kaggle benchmark artifacts—not this UI surrogate—for reproducible model research once those artifacts have been generated and integrated.`;
 }
 
 function generateResponse(text: string): { content: string; comparison?: ComparisonRow[] } {
@@ -305,7 +264,7 @@ function generateResponse(text: string): { content: string; comparison?: Compari
 
   const params = parseMessage(text);
   if (hasAnyParams(params)) {
-    return { content: generatePrognosisResponse(params) };
+    return { content: generateScenarioResponse(params) };
   }
 
   return { content: generateCapabilityResponse() };
@@ -316,16 +275,16 @@ function generateResponse(text: string): { content: string; comparison?: Compari
 /* ------------------------------------------------------------------ */
 
 const SUGGESTED_PROMPTS = [
-  '55yo Stage II ER+',
-  'Compare treatments for 60yo Stage III',
-  'What factors affect prognosis?',
+  'Explain the UI surrogate',
+  'Compare demo scenarios for 60yo Stage III',
+  'What inputs affect the demo score?',
 ];
 
 const WELCOME_MESSAGE: ChatMessage = {
   id: 'welcome',
   role: 'ai',
   content:
-    "Hello! I'm Aegis AI, your clinical prognostic assistant. Ask me about patient outcomes, treatment comparisons, or risk factors. Try: \"What's the prognosis for a 55yo Stage II ER+ patient?\"",
+    "Hello! I'm Aegis AI, a scripted synthetic-research assistant. I can explain demo inputs and non-causal scenario sensitivity. I cannot provide diagnosis, prognosis, medical advice, or treatment recommendations.",
 };
 
 /* ------------------------------------------------------------------ */
@@ -431,7 +390,7 @@ export default function AIAssistant() {
                   <span className="text-[8px] text-emerald-600 font-mono-data uppercase tracking-[0.18em] font-bold">online</span>
                 </div>
                 <p className="text-[9px] text-slate-400 font-mono-data uppercase tracking-[0.18em] mt-0.5">
-                  Clinical Prognostic Assistant
+                  Scripted Research-Demo Assistant
                 </p>
               </div>
               <button
@@ -480,7 +439,7 @@ export default function AIAssistant() {
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="Ask about prognosis, treatments…"
+                  placeholder="Ask about demo inputs or scenario sensitivity…"
                   className="w-full bg-white/90 border border-slate-200 focus:border-violet-400 focus:ring-2 focus:ring-violet-400/20 rounded-xl px-3.5 py-2.5 text-[12px] text-slate-700 placeholder:text-slate-400 outline-none transition-all shadow-sm"
                 />
               </div>
@@ -634,7 +593,6 @@ function InlineBold({ text }: { text: string }) {
 /* ------------------------------------------------------------------ */
 
 function ComparisonTable({ rows }: { rows: ComparisonRow[] }) {
-  const best = rows.reduce((a, b) => (b.meanHazard < a.meanHazard ? b : a), rows[0]);
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -643,36 +601,26 @@ function ComparisonTable({ rows }: { rows: ComparisonRow[] }) {
       className="mt-2 rounded-xl border border-slate-200/60 overflow-hidden bg-white/70"
     >
       <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-2 px-2.5 py-1.5 bg-violet-50/70 border-b border-violet-200/40">
-        <span className="text-[8px] font-mono-data uppercase tracking-wider text-violet-600 font-bold">Intervention</span>
-        <span className="text-[8px] font-mono-data uppercase tracking-wider text-violet-600 font-bold text-right">Hazard</span>
-        <span className="text-[8px] font-mono-data uppercase tracking-wider text-violet-600 font-bold text-right">Med OS</span>
-        <span className="text-[8px] font-mono-data uppercase tracking-wider text-violet-600 font-bold text-right">5yr</span>
+        <span className="text-[8px] font-mono-data uppercase tracking-wider text-violet-600 font-bold">Scenario</span>
+        <span className="text-[8px] font-mono-data uppercase tracking-wider text-violet-600 font-bold text-right">Score</span>
+        <span className="text-[8px] font-mono-data uppercase tracking-wider text-violet-600 font-bold text-right">Demo day</span>
+        <span className="text-[8px] font-mono-data uppercase tracking-wider text-violet-600 font-bold text-right">Day 2000</span>
       </div>
-      {rows.map((r) => {
-        const isBest = r.intervention === best.intervention;
-        return (
-          <div
-            key={r.intervention}
-            className={`grid grid-cols-[1fr_auto_auto_auto] gap-x-2 px-2.5 py-1.5 items-center border-b border-slate-100 last:border-b-0 ${
-              isBest ? 'bg-emerald-50/60' : 'bg-white/40'
-            }`}
-          >
-            <span className="text-[10px] font-semibold text-slate-700 flex items-center gap-1.5">
-              {isBest && <Activity size={10} className="text-emerald-500" />}
-              <span className="truncate">{r.intervention}</span>
-            </span>
-            <span className={`text-[10px] font-mono-data text-right ${isBest ? 'text-emerald-600 font-bold' : 'text-slate-600'}`}>
-              {r.meanHazard.toFixed(2)}
-            </span>
-            <span className="text-[10px] font-mono-data text-right text-slate-600">
-              {r.medianOS !== null ? `${Math.round(r.medianOS).toLocaleString()}d` : '—'}
-            </span>
-            <span className={`text-[10px] font-mono-data text-right ${isBest ? 'text-emerald-600 font-bold' : 'text-slate-600'}`}>
-              {Math.round(r.s2000)}%
-            </span>
-          </div>
-        );
-      })}
+      {rows.map((row) => (
+        <div
+          key={row.intervention}
+          className="grid grid-cols-[1fr_auto_auto_auto] gap-x-2 px-2.5 py-1.5 items-center border-b border-slate-100 last:border-b-0 bg-white/40"
+        >
+          <span className="text-[10px] font-semibold text-slate-700 truncate">{row.intervention}</span>
+          <span className="text-[10px] font-mono-data text-right text-slate-600">{row.surrogateScore.toFixed(2)}</span>
+          <span className="text-[10px] font-mono-data text-right text-slate-600">
+            {row.medianDemoDay !== null ? `${Math.round(row.medianDemoDay).toLocaleString()}d` : '—'}
+          </span>
+          <span className="text-[10px] font-mono-data text-right text-slate-600">
+            {Math.round(row.day2000DemoSurvival)}%
+          </span>
+        </div>
+      ))}
     </motion.div>
   );
 }
@@ -691,7 +639,7 @@ function TypingIndicator() {
       className="flex justify-start gap-2"
     >
       <div className="flex-shrink-0 w-7 h-7 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-sm">
-        <Stethoscope className="text-white" size={13} />
+        <Sparkles className="text-white" size={13} />
       </div>
       <div className="px-4 py-3.5 rounded-2xl rounded-bl-md bg-white/80 border border-slate-200/60 shadow-sm flex items-center gap-1.5">
         {[0, 1, 2].map((i) => (

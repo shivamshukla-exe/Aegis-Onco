@@ -13,6 +13,9 @@ import {
 } from '../components/ui';
 import { FEDERATED_NODES, TRAINING_HISTORY } from '../lib/engine';
 
+type ChartTooltipValue = number | string | ReadonlyArray<number | string> | undefined;
+type ChartTooltipName = number | string | undefined;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tooltip style (emerald-tinted to match page accent)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -299,7 +302,7 @@ export default function FederatedLearning() {
               />
               <Tooltip
                 contentStyle={tooltipStyle}
-                formatter={(value: any, name: any) => {
+                formatter={(value: ChartTooltipValue, name: ChartTooltipName) => {
                   if (name === 'Accuracy') return [`${(Number(value) * 100).toFixed(2)}%`, name];
                   return [Number(value).toFixed(4), name];
                 }}
@@ -528,7 +531,7 @@ export default function FederatedLearning() {
                 />
                 <Tooltip
                   contentStyle={tooltipStyle}
-                  formatter={(v: any) => [Number(v).toFixed(4), 'Gradient Norm']}
+                  formatter={(v: ChartTooltipValue) => [Number(v).toFixed(4), 'Gradient Norm']}
                 />
                 <ReferenceLine y={0.1} stroke="rgba(16,185,129,0.3)" strokeDasharray="4 4" label={{ value: 'converged', position: 'right', style: { fontSize: 8, fill: '#10b981', fontFamily: "'JetBrains Mono', monospace" } }} />
                 <Area

@@ -16,6 +16,7 @@ import {
 } from '../lib/types';
 import { runFullEngine } from '../lib/engine';
 import { supabase } from '../lib/supabase';
+import { createPredictionProvenance, PATIENT_COLUMNS, writeDemoActivity } from '../lib/researchPlatform';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Toast types
@@ -23,7 +24,7 @@ import { supabase } from '../lib/supabase';
 type ToastKind = 'success' | 'error';
 interface Toast { id: number; kind: ToastKind; message: string; }
 
-type SortKey = 'created_at' | 'mean_hazard' | 'uncertainty_std' | 'day1095_survival' | 'age';
+type SortKey = 'created_at' | 'surrogate_score' | 'variation_std' | 'day1095_survival' | 'age';
 type SortDir = 'asc' | 'desc';
 
 const STATUS_OPTIONS: Status[] = ['Positive', 'Negative'];
@@ -55,6 +56,7 @@ function recordToInput(r: PatientRecord): PatientInput {
 
 function inputToRow(input: PatientInput) {
   const engine = runFullEngine(input);
+  const provenance = createPredictionProvenance(input, engine.variationStd);
   return {
     age: input.age,
     tumor_size: input.tumorSize,
@@ -73,10 +75,11 @@ function inputToRow(input: PatientInput) {
     her2_status: input.her2Status,
     pr_status: input.prStatus,
     intervention: input.intervention,
-    mean_hazard: engine.meanHazard,
-    uncertainty_std: engine.uncertaintyStd,
+    surrogate_score: engine.meanSurrogateScore,
+    variation_std: engine.variationStd,
     median_os: engine.medianDay,
     day1095_survival: engine.s1095,
+    ...provenance,
   };
 }
 
@@ -90,14 +93,14 @@ function PatientForm({ value, onChange }: { value: PatientInput; onChange: (v: P
     <div className="space-y-5">
       {/* Module 1: Clinical */}
       <div>
-        <ModuleHeader icon={HeartPulse} title="EHR Clinical Metadata" subtitle="Module 1 · Patient Stratification" accent="violet" />
+        <ModuleHeader icon={HeartPulse} title="Synthetic Clinical Inputs" subtitle="Module 1 · Demo Stratification Variables" accent="violet" />
         <div className="space-y-4">
           <SliderRow label="Patient Age" value={value.age} display={`${value.age} yrs`} min={21} max={97} step={1} onChange={(v) => set('age', v)} />
           <SliderRow label="Primary Tumor Size" value={value.tumorSize} display={`${value.tumorSize} mm`} min={1} max={180} step={1} onChange={(v) => set('tumorSize', v)} accent="blue" />
           <SliderRow label="Positive Lymph Nodes" value={value.lymphNodes} display={`${value.lymphNodes}`} min={0} max={45} step={1} onChange={(v) => set('lymphNodes', v)} accent="rose" />
           <SliderRow label="Nottingham Prognostic Index" value={value.npi} display={value.npi.toFixed(1)} min={1.0} max={6.5} step={0.1} onChange={(v) => set('npi', v)} accent="amber" />
           <div>
-            <label className="text-[11px] text-slate-500 font-semibold tracking-wide block mb-2.5">Clinical TNM Stage</label>
+            <label className="text-[11px] text-slate-500 font-semibold tracking-wide block mb-2.5">Demo Stage Variable</label>
             <SelectControl<Stage> options={STAGES} value={value.stage} onChange={(v) => set('stage', v)} disabled={!value.hasFullStaging} />
           </div>
           <div>
@@ -153,7 +156,7 @@ function PatientForm({ value, onChange }: { value: PatientInput; onChange: (v: P
 
       {/* Module 4: Intervention */}
       <div>
-        <ModuleHeader icon={GitBranch} title="Counterfactual Intervention" subtitle="Module 4 · Treatment Pathway" accent="amber" />
+        <ModuleHeader icon={GitBranch} title="Non-Causal Scenario" subtitle="Module 4 · Arbitrary Demo Offset" accent="amber" />
         <div>
           <label className="text-[11px] text-slate-500 font-semibold tracking-wide block mb-2.5">Intervention Strategy</label>
           <SelectControl<Intervention> options={INTERVENTIONS} value={value.intervention} onChange={(v) => set('intervention', v)} />
@@ -222,10 +225,10 @@ function PatientModal({
                 </motion.div>
                 <div>
                   <h2 className="text-[15px] font-extrabold tracking-tight text-slate-800">
-                    {mode === 'edit' ? 'Edit Patient Record' : 'Register New Patient'}
+                    {mode === 'edit' ? 'Edit Synthetic Record' : 'Register Synthetic Record'}
                   </h2>
                   <p className="text-[9px] text-slate-400 font-mono-data uppercase tracking-[0.18em] mt-0.5">
-                    {mode === 'edit' ? 'Update · Recompute Engine' : 'Ingest · Compute Prognostic Engine'}
+                    {mode === 'edit' ? 'Update · Recompute Demo Surrogate' : 'Ingest · Compute Demo Surrogate'}
                   </p>
                 </div>
               </div>
@@ -313,11 +316,11 @@ function DeleteConfirm({
                 <AlertCircle size={20} className="text-rose-500" />
               </motion.div>
               <div className="flex-1">
-                <h2 className="text-[15px] font-extrabold tracking-tight text-slate-800">Delete Patient Record?</h2>
+                <h2 className="text-[15px] font-extrabold tracking-tight text-slate-800">Archive Synthetic Record?</h2>
                 <p className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">
-                  You are about to permanently remove{' '}
+                  You are about to remove{' '}
                   <span className="font-mono-data font-bold text-rose-600">{patient.patient_code}</span>
-                  {' '}from the federated cohort database. This action cannot be undone.
+                  {' '}from the active demo registry. The synthetic record and immutable prediction history are retained for research reproducibility.
                 </p>
               </div>
             </div>
@@ -368,9 +371,13 @@ export default function PatientRegistry() {
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [stageFilter, setStageFilter] = useState<Stage | 'All'>('All');
   const [sortKey, setSortKey] = useState<SortKey>('created_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(20);
+  const [totalCount, setTotalCount] = useState(0);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
@@ -394,81 +401,74 @@ export default function PatientRegistry() {
     }, 3500);
   }, []);
 
-  // ── Fetch all patients ──
+  // Debounce network-backed search and reset pagination when query semantics change.
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+  useEffect(() => { setPage(0); }, [debouncedSearch, stageFilter, sortKey, sortDir, pageSize]);
+
+  // Fetch one explicitly selected, server-filtered and server-ordered page.
   const fetchPatients = useCallback(async () => {
     setLoading(true);
     setFetchError(null);
-    const { data, error } = await supabase
+    let query = supabase
       .from('patients')
-      .select('*')
-      .order('created_at', { ascending: false });
+      .select(PATIENT_COLUMNS, { count: 'exact' })
+      .is('deleted_at', null);
+    const safeSearch = debouncedSearch.replace(/[^a-zA-Z0-9 ._-]/g, '');
+    if (safeSearch) query = query.or(`patient_code.ilike.%${safeSearch}%,stage.ilike.%${safeSearch}%`);
+    if (stageFilter !== 'All') query = query.eq('stage', stageFilter);
+    const from = page * pageSize;
+    const { data, error, count } = await query
+      .order(sortKey, { ascending: sortDir === 'asc' })
+      .range(from, from + pageSize - 1);
 
     if (error) {
       setFetchError(error.message || 'Failed to fetch patients');
       setPatients([]);
     } else {
-      setPatients((data ?? []) as PatientRecord[]);
+      setPatients((data ?? []) as unknown as PatientRecord[]);
+      setTotalCount(count ?? 0);
     }
     setLoading(false);
-  }, []);
+  }, [debouncedSearch, stageFilter, sortKey, sortDir, page, pageSize]);
 
   useEffect(() => { void fetchPatients(); }, [fetchPatients]);
 
-  // ── Supabase realtime: auto-refresh on any change ──
+  // Re-fetch the authoritative server page after any realtime change. This avoids
+  // double-counting local optimistic writes and keeps pagination/filter order exact.
   useEffect(() => {
-    const channel = supabase
-      .channel('patients-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'patients' },
-        () => { void fetchPatients(); })
+    let timer: number | undefined;
+    const channel = supabase.channel('patients-phase4-refresh')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'patients' }, () => {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(() => { void fetchPatients(); }, 120);
+      })
       .subscribe();
-    return () => { void supabase.removeChannel(channel); };
+    return () => {
+      window.clearTimeout(timer);
+      void supabase.removeChannel(channel);
+    };
   }, [fetchPatients]);
 
-  // ── Filter + sort ──
-  const filtered = useMemo(() => {
-    let list = [...patients];
-    const q = search.trim().toLowerCase();
-    if (q) {
-      list = list.filter((p) =>
-        p.patient_code.toLowerCase().includes(q) ||
-        p.stage.toLowerCase().includes(q),
-      );
-    }
-    if (stageFilter !== 'All') {
-      list = list.filter((p) => p.stage === stageFilter);
-    }
-    list.sort((a, b) => {
-      let av: number | string;
-      let bv: number | string;
-      if (sortKey === 'created_at') { av = a.created_at; bv = b.created_at; }
-      else { av = a[sortKey]; bv = b[sortKey]; }
-      let cmp = 0;
-      if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
-      else cmp = String(av).localeCompare(String(bv));
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-    return list;
-  }, [patients, search, stageFilter, sortKey, sortDir]);
+  const filtered = patients;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  useEffect(() => {
+    if (page >= totalPages) setPage(totalPages - 1);
+  }, [page, totalPages]);
 
-  // ── KPIs ──
+  // Page-level model summaries; total is the exact server-side filtered count.
   const kpis = useMemo(() => {
     const n = patients.length;
-    if (n === 0) return { total: 0, avgHazard: 0, avgUncertainty: 0, avgDay1095: 0 };
-    const avgHazard = patients.reduce((s, p) => s + p.mean_hazard, 0) / n;
-    const avgUncertainty = patients.reduce((s, p) => s + p.uncertainty_std, 0) / n;
-    const avgDay1095 = patients.reduce((s, p) => s + p.day1095_survival, 0) / n;
-    return { total: n, avgHazard, avgUncertainty, avgDay1095 };
-  }, [patients]);
-
-  // ── Generate next patient_code: PT-0001 ──
-  const nextPatientCode = useMemo(() => {
-    let maxSeq = 0;
-    for (const p of patients) {
-      const m = p.patient_code.match(/PT-(\d+)/i);
-      if (m) { const n = parseInt(m[1], 10); if (n > maxSeq) maxSeq = n; }
-    }
-    return `PT-${String(maxSeq + 1).padStart(4, '0')}`;
-  }, [patients]);
+    if (n === 0) return { total: totalCount, avgSurrogateScore: 0, avgVariation: 0, avgDay1095: 0 };
+    return {
+      total: totalCount,
+      avgSurrogateScore: patients.reduce((sum, patient) => sum + patient.surrogate_score, 0) / n,
+      avgVariation: patients.reduce((sum, patient) => sum + patient.variation_std, 0) / n,
+      avgDay1095: patients.reduce((sum, patient) => sum + patient.day1095_survival, 0) / n,
+    };
+  }, [patients, totalCount]);
 
   // ── Open create modal ──
   const openCreate = useCallback(() => {
@@ -499,29 +499,43 @@ export default function PatientRegistry() {
     try {
       const row = inputToRow(input);
       if (modalMode === 'edit' && editing) {
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('patients')
           .update(row)
-          .eq('id', editing.id);
+          .eq('id', editing.id)
+          .select(PATIENT_COLUMNS)
+          .single();
         if (error) throw error;
+        const updated = data as unknown as PatientRecord;
+        await writeDemoActivity('update', updated, {
+          model_version: updated.model_version,
+          prediction_run_id: updated.prediction_run_id,
+        });
+        await fetchPatients();
         pushToast('success', `${editing.patient_code} updated successfully`);
       } else {
         const { data, error } = await supabase
           .from('patients')
-          .insert({ ...row, patient_code: nextPatientCode })
-          .select()
+          .insert(row)
+          .select(PATIENT_COLUMNS)
           .single();
         if (error) throw error;
-        pushToast('success', `${(data as PatientRecord | null)?.patient_code ?? nextPatientCode} registered successfully`);
+        const created = data as unknown as PatientRecord;
+        await writeDemoActivity('create', created, {
+          model_version: created.model_version,
+          prediction_run_id: created.prediction_run_id,
+        });
+        setPage(0);
+        if (page === 0) await fetchPatients();
+        pushToast('success', `${created.patient_code} registered successfully`);
       }
       setModalOpen(false);
-      await fetchPatients();
-    } catch (err: any) {
-      pushToast('error', err?.message || 'Operation failed');
+    } catch (err: unknown) {
+      pushToast('error', err instanceof Error ? err.message : 'Operation failed');
     } finally {
       setSubmitting(false);
     }
-  }, [modalMode, editing, nextPatientCode, pushToast, fetchPatients]);
+  }, [modalMode, editing, page, pushToast, fetchPatients]);
 
   // ── Delete ──
   const openDelete = useCallback((p: PatientRecord) => {
@@ -535,15 +549,17 @@ export default function PatientRegistry() {
     try {
       const { error } = await supabase
         .from('patients')
-        .delete()
-        .eq('id', deleteTarget.id);
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', deleteTarget.id)
+        .is('deleted_at', null);
       if (error) throw error;
-      pushToast('success', `${deleteTarget.patient_code} deleted`);
+      await writeDemoActivity('delete', deleteTarget, { synthetic_data: true, deletion_mode: 'soft_delete' });
+      await fetchPatients();
+      pushToast('success', `${deleteTarget.patient_code} archived from the active demo registry`);
       setDeleteOpen(false);
       setDeleteTarget(null);
-      await fetchPatients();
-    } catch (err: any) {
-      pushToast('error', err?.message || 'Delete failed');
+    } catch (err: unknown) {
+      pushToast('error', err instanceof Error ? err.message : 'Delete failed');
     } finally {
       setDeleting(false);
     }
@@ -558,40 +574,37 @@ export default function PatientRegistry() {
   const columns: { key: SortKey; label: string; align?: 'right' }[] = [
     { key: 'created_at', label: 'Registered' },
     { key: 'age', label: 'Age', align: 'right' },
-    { key: 'mean_hazard', label: 'Mean Hazard', align: 'right' },
-    { key: 'uncertainty_std', label: 'σ Uncertainty', align: 'right' },
+    { key: 'surrogate_score', label: 'Surrogate Score', align: 'right' },
+    { key: 'variation_std', label: 'Seeded Variation σ', align: 'right' },
     { key: 'day1095_survival', label: 'Day 1095', align: 'right' },
   ];
 
   return (
-    <div className="min-h-screen mesh-bg text-slate-800 relative overflow-x-hidden">
-      {/* Ambient orbs */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <motion.div animate={{ x: [0, 40, 0], y: [0, -30, 0] }} transition={{ duration: 20, repeat: Infinity, ease: 'easeInOut' }}
-          className="absolute top-[10%] left-[15%] w-[400px] h-[400px] bg-blue-300/20 rounded-full blur-[100px]" />
-        <motion.div animate={{ x: [0, -50, 0], y: [0, 40, 0] }} transition={{ duration: 25, repeat: Infinity, ease: 'easeInOut' }}
-          className="absolute bottom-[15%] right-[12%] w-[350px] h-[350px] bg-violet-300/15 rounded-full blur-[100px]" />
-      </div>
+    <div className="min-h-screen text-slate-800 relative overflow-x-hidden">
 
       <div className="relative z-10 max-w-[1400px] mx-auto px-4 lg:px-6 py-6">
         {/* Header */}
-        <PageHeader icon={Users} title="Patient Registry" subtitle="Federated Patient Cohort Database" accent="blue">
+        <PageHeader icon={Users} title="Patient Registry" subtitle="Synthetic Research Cohort · Demo Data Only" accent="blue">
           <motion.button
             whileTap={{ scale: 0.97 }} whileHover={{ scale: 1.03 }}
             onClick={openCreate}
             className="relative overflow-hidden px-5 py-3 rounded-2xl font-bold text-[13px] text-white bg-gradient-to-r from-blue-500 to-indigo-600 shadow-[0_4px_20px_rgba(59,130,246,0.4)] transition-all flex items-center gap-2"
           >
-            <Plus size={16} /> Register New Patient
+            <Plus size={16} /> Add Synthetic Record
             <div className="shimmer absolute inset-0" />
           </motion.button>
         </PageHeader>
 
+        <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-[11px] text-amber-800 font-mono-data">
+          <strong>Research demo:</strong> all records must be synthetic. Outputs are experimental, not medical advice, not for clinical decisions, and no HIPAA compliance is claimed.
+        </div>
+
         {/* KPI strip */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <KpiCard icon={Users} label="Total Patients" value={String(kpis.total)} sub="Federated cohort size" accent="blue" />
-          <KpiCard icon={Activity} label="Avg Hazard" value={kpis.total ? kpis.avgHazard.toFixed(3) : '—'} sub="Mean log-hazard across cohort" accent="violet" />
-          <KpiCard icon={ShieldCheck} label="Avg Uncertainty" value={kpis.total ? kpis.avgUncertainty.toFixed(3) : '—'} sub="Epistemic σ across cohort" accent="emerald" />
-          <KpiCard icon={HeartPulse} label="Avg Day 1095" value={kpis.total ? `${kpis.avgDay1095.toFixed(1)}%` : '—'} sub="3-year survival probability" accent="amber" />
+          <KpiCard icon={Users} label="Total Records" value={String(kpis.total)} sub="Filtered synthetic demo records" accent="blue" />
+          <KpiCard icon={Activity} label="Page Avg Surrogate" value={patients.length ? kpis.avgSurrogateScore.toFixed(3) : '—'} sub="Hand-authored score · current page" accent="violet" />
+          <KpiCard icon={ShieldCheck} label="Page Avg Variation" value={patients.length ? kpis.avgVariation.toFixed(3) : '—'} sub="Seeded spread · current page" accent="emerald" />
+          <KpiCard icon={HeartPulse} label="Page Avg Day 1095" value={patients.length ? `${kpis.avgDay1095.toFixed(1)}%` : '—'} sub="Synthetic curve · current page" accent="amber" />
         </div>
 
         {/* Toolbar: search + stage filter + sort */}
@@ -625,10 +638,21 @@ export default function PatientRegistry() {
             {/* Sort key */}
             <div className="min-w-[160px]">
               <SelectControl<string>
-                options={['created_at', 'mean_hazard', 'uncertainty_std', 'day1095_survival', 'age']}
+                options={['created_at', 'surrogate_score', 'variation_std', 'day1095_survival', 'age']}
                 value={sortKey}
                 onChange={(v) => setSortKey(v as SortKey)}
               />
+            </div>
+
+            <div className="min-w-[105px]">
+              <select
+                aria-label="Page size"
+                value={pageSize}
+                onChange={(event) => setPageSize(Number(event.target.value))}
+                className="w-full px-3 py-2.5 rounded-xl bg-white/80 border border-slate-200 text-[11px] font-mono-data font-bold text-slate-600 shadow-sm"
+              >
+                {[10, 20, 50].map((size) => <option key={size} value={size}>{size} / page</option>)}
+              </select>
             </div>
 
             {/* Sort dir */}
@@ -645,7 +669,7 @@ export default function PatientRegistry() {
         {/* Body: loading / error / empty / table */}
         {loading ? (
           <GlassCard className="rounded-3xl p-8">
-            <LoadingSpinner label="Fetching federated cohort…" />
+            <LoadingSpinner label="Fetching synthetic demo records…" />
           </GlassCard>
         ) : fetchError ? (
           <GlassCard className="rounded-3xl p-8">
@@ -694,14 +718,14 @@ export default function PatientRegistry() {
                 />
               </motion.div>
               <h3 className="text-[16px] font-extrabold text-slate-800 mb-1.5">
-                {patients.length === 0 ? 'No Patients Registered' : 'No Matching Patients'}
+                {totalCount === 0 ? 'No Patients Registered' : 'No Matching Patients'}
               </h3>
               <p className="text-[11px] text-slate-500 font-mono-data max-w-md mb-6 leading-relaxed">
-                {patients.length === 0
-                  ? 'The federated cohort database is empty. Register your first patient to begin prognostic modeling.'
-                  : 'No patients match the current search or filter criteria. Try adjusting your query.'}
+                {totalCount === 0
+                  ? 'The synthetic demo registry is empty. Add a record to exercise the deterministic UI workflow.'
+                  : 'No synthetic records match the current search or filter criteria. Try adjusting your query.'}
               </p>
-              {patients.length === 0 ? (
+              {totalCount === 0 ? (
                 <motion.button
                   whileTap={{ scale: 0.97 }} whileHover={{ scale: 1.03 }}
                   onClick={openCreate}
@@ -771,13 +795,13 @@ export default function PatientRegistry() {
                             </td>
                             <td className="px-4 py-4 text-right font-mono-data text-[12px] text-slate-700 font-semibold">{p.age}</td>
                             <td className="px-4 py-4 text-right">
-                              <span className={`font-mono-data text-[12px] font-bold ${p.mean_hazard > 1.5 ? 'text-rose-500' : p.mean_hazard > 0.5 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                                {p.mean_hazard.toFixed(3)}
+                              <span className={`font-mono-data text-[12px] font-bold ${p.surrogate_score > 1.5 ? 'text-rose-500' : p.surrogate_score > 0.5 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                {p.surrogate_score.toFixed(3)}
                               </span>
                             </td>
                             <td className="px-4 py-4 text-right">
-                              <span className={`font-mono-data text-[12px] font-bold ${p.uncertainty_std > 0.8 ? 'text-rose-500' : 'text-slate-600'}`}>
-                                {p.uncertainty_std.toFixed(3)}
+                              <span className={`font-mono-data text-[12px] font-bold ${p.variation_std > 0.8 ? 'text-rose-500' : 'text-slate-600'}`}>
+                                {p.variation_std.toFixed(3)}
                               </span>
                             </td>
                             <td className="px-4 py-4 text-right">
@@ -859,15 +883,15 @@ export default function PatientRegistry() {
                             <div className="font-mono-data text-[14px] text-slate-700 font-bold mt-0.5">{p.age}</div>
                           </div>
                           <div className="p-2.5 rounded-xl bg-white/50 border border-slate-200/50">
-                            <div className="text-[9px] text-slate-400 uppercase tracking-wider font-mono-data font-semibold">Mean Hazard</div>
-                            <div className={`font-mono-data text-[14px] font-bold mt-0.5 ${p.mean_hazard > 1.5 ? 'text-rose-500' : p.mean_hazard > 0.5 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                              {p.mean_hazard.toFixed(3)}
+                            <div className="text-[9px] text-slate-400 uppercase tracking-wider font-mono-data font-semibold">Surrogate Score</div>
+                            <div className={`font-mono-data text-[14px] font-bold mt-0.5 ${p.surrogate_score > 1.5 ? 'text-rose-500' : p.surrogate_score > 0.5 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                              {p.surrogate_score.toFixed(3)}
                             </div>
                           </div>
                           <div className="p-2.5 rounded-xl bg-white/50 border border-slate-200/50">
-                            <div className="text-[9px] text-slate-400 uppercase tracking-wider font-mono-data font-semibold">σ Uncertainty</div>
-                            <div className={`font-mono-data text-[14px] font-bold mt-0.5 ${p.uncertainty_std > 0.8 ? 'text-rose-500' : 'text-slate-600'}`}>
-                              {p.uncertainty_std.toFixed(3)}
+                            <div className="text-[9px] text-slate-400 uppercase tracking-wider font-mono-data font-semibold">σ Seeded Variation</div>
+                            <div className={`font-mono-data text-[14px] font-bold mt-0.5 ${p.variation_std > 0.8 ? 'text-rose-500' : 'text-slate-600'}`}>
+                              {p.variation_std.toFixed(3)}
                             </div>
                           </div>
                           <div className="p-2.5 rounded-xl bg-white/50 border border-slate-200/50">
@@ -906,8 +930,18 @@ export default function PatientRegistry() {
             </motion.div>
 
             {/* Result count */}
-            <div className="mt-4 text-center text-[10px] text-slate-400 font-mono-data uppercase tracking-wider">
-              Showing {filtered.length} of {patients.length} patients
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-[10px] text-slate-400 font-mono-data uppercase tracking-wider">
+              <button
+                disabled={page === 0}
+                onClick={() => setPage((value) => Math.max(0, value - 1))}
+                className="px-3 py-2 rounded-lg border border-slate-200 bg-white/70 disabled:opacity-40"
+              >Previous</button>
+              <span>Page {page + 1} of {totalPages} · Showing {filtered.length} of {totalCount} matching records</span>
+              <button
+                disabled={page + 1 >= totalPages}
+                onClick={() => setPage((value) => Math.min(totalPages - 1, value + 1))}
+                className="px-3 py-2 rounded-lg border border-slate-200 bg-white/70 disabled:opacity-40"
+              >Next</button>
             </div>
           </>
         )}

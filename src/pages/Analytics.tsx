@@ -36,20 +36,20 @@ const TOTAL = POPULATION_STATS.totalPatients;
 const SURVIVAL_CURVES = STAGES.map((stage) => {
   const stageIdx = STAGES.indexOf(stage);
   // Higher stage → faster survival decay
-  const baseHazard = 0.15 + stageIdx * 0.22;
+  const baseScore = 0.15 + stageIdx * 0.22;
   const points = Array.from({ length: 41 }, (_, i) => {
     const day = i * 50; // 0 → 2000
     const h0 = Math.pow(day / 1200, 1.8);
-    const surv = Math.exp(-h0 * Math.exp(baseHazard)) * 100;
+    const surv = Math.exp(-h0 * Math.exp(baseScore)) * 100;
     return { day, survival: Math.max(Math.min(surv, 100), 0) };
   });
   return { stage, color: STAGE_COLORS[stage], data: points };
 });
 
-// Hazard distribution — synthetic log-hazard across population (smooth area)
-const HAZARD_DISTRIBUTION = (() => {
+// Synthetic surrogate-score distribution used only for chart rendering.
+const SCORE_DISTRIBUTION = (() => {
   const points: { x: number; density: number }[] = [];
-  // Bimodal-ish distribution centered around log-hazard ~0.4
+  // Bimodal illustrative distribution centered around a demo score of 0.4.
   for (let x = -2; x <= 3; x += 0.1) {
     const v = Math.round(x * 10) / 10;
     const peak1 = Math.exp(-Math.pow(v - 0.4, 2) / 0.5) * 0.85;
@@ -84,46 +84,76 @@ const CORR_MATRIX: number[][] = [
   [0.21, 0.34, 0.29, 0.31, 1.00],
 ];
 
-// Key insights
+// Static, explicitly synthetic UI observations; not results from the Kaggle benchmark.
 const INSIGHTS = [
   {
     icon: CheckCircle2,
     accent: 'emerald' as const,
-    title: 'ER-Positive Survival Advantage',
-    finding: 'ER-positive patients show 23% better 5-year survival compared to ER-negative cohorts, validating endocrine therapy responsiveness.',
-    metric: '+23%',
-    metricLabel: 'Survival Benefit',
+    title: 'Synthetic Receptor Mix',
+    finding: 'This card summarizes the fixed demo distribution used to exercise dashboard layouts. It is not an efficacy or treatment-response analysis.',
+    metric: 'Demo',
+    metricLabel: 'Static UI Data',
   },
   {
     icon: TrendingUp,
     accent: 'violet' as const,
-    title: 'Double-Agent Cocktail Efficacy',
-    finding: 'Stage IV patients receiving Double-Agent Cocktail demonstrate 45% hazard reduction versus Standard Clinical Routine, with acceptable uncertainty bounds.',
-    metric: '-45%',
-    metricLabel: 'Hazard Reduction',
+    title: 'Scenario Offset Demonstration',
+    finding: 'Named scenarios apply arbitrary offsets in the browser surrogate. Differences are non-causal and do not estimate benefit or comparative effectiveness.',
+    metric: '3',
+    metricLabel: 'Demo Scenarios',
   },
   {
     icon: AlertTriangle,
     accent: 'amber' as const,
-    title: 'High Mutation Burden Correlation',
-    finding: 'Mutation count >12 strongly correlates with Stage III/IV progression (r=0.68), suggesting genomic instability as a late-stage driver.',
-    metric: 'r=0.68',
-    metricLabel: 'Correlation',
+    title: 'Synthetic Correlation Example',
+    finding: 'The displayed matrix is fixed illustrative data for interface testing, not a measured METABRIC result or evidence of disease progression.',
+    metric: 'Static',
+    metricLabel: 'Illustration Only',
   },
   {
     icon: Brain,
     accent: 'cyan' as const,
-    title: 'NPI Predictive Power',
-    finding: 'Nottingham Prognostic Index shows the strongest correlation with tumor size (r=0.78) and lymph node involvement (r=0.72), confirming its composite utility.',
-    metric: 'r=0.78',
-    metricLabel: 'Strongest Link',
+    title: 'Artifact Integration Pending',
+    finding: 'Real benchmark metrics must come from a completed Kaggle run and versioned exported artifacts before they can replace synthetic dashboard telemetry.',
+    metric: 'Pending',
+    metricLabel: 'Kaggle Artifacts',
   },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Custom Tooltip components
 // ─────────────────────────────────────────────────────────────────────────────
-function StageDonutTooltip({ active, payload }: { active?: boolean; payload?: any[] }) {
+interface StageDonutDatum {
+  stage: Stage;
+  count: number;
+  color: string;
+}
+
+interface StageDonutPayloadItem {
+  payload?: StageDonutDatum;
+}
+
+interface GenericTooltipPayloadItem {
+  color?: string;
+  fill?: string;
+  stroke?: string;
+  name?: number | string;
+  value?: number | string | ReadonlyArray<number | string>;
+}
+
+interface StageDonutTooltipProps {
+  active?: boolean;
+  payload?: ReadonlyArray<StageDonutPayloadItem>;
+}
+
+interface GenericTooltipProps {
+  active?: boolean;
+  payload?: ReadonlyArray<GenericTooltipPayloadItem>;
+  label?: number | string;
+  suffix?: string;
+}
+
+function StageDonutTooltip({ active, payload }: StageDonutTooltipProps) {
   if (!active || !payload?.length) return null;
   const d = payload[0]?.payload;
   if (!d) return null;
@@ -146,7 +176,7 @@ function StageDonutTooltip({ active, payload }: { active?: boolean; payload?: an
   );
 }
 
-function GenericTooltip({ active, payload, label, suffix = '' }: { active?: boolean; payload?: any[]; label?: string; suffix?: string }) {
+function GenericTooltip({ active, payload, label, suffix = '' }: GenericTooltipProps) {
   if (!active || !payload?.length) return null;
   return (
     <div className="glass-card rounded-xl px-3 py-2 min-w-[120px]">
@@ -230,23 +260,27 @@ export default function Analytics() {
       <PageHeader
         icon={BarChart3}
         title="Analytics & Insights"
-        subtitle="Population-Level Oncological Intelligence · Cohort Analytics"
+        subtitle="Fixed Synthetic Distributions · UI Demonstration Only"
         accent="cyan"
       />
 
+      <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-[11px] leading-relaxed text-amber-900 font-mono-data">
+        <strong>Synthetic analytics:</strong> every value on this page is fixed illustrative UI data. Nothing here was computed from METABRIC rows, notebook artifacts, live institutions, or registered demo records.
+      </div>
+
       {/* ── KPI Row ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <KpiCard icon={Users} label="Total Patients" value={TOTAL.toLocaleString()} sub="Across 5 active cohorts" accent="cyan" />
-        <KpiCard icon={Activity} label="Median Age" value={`${POPULATION_STATS.medianAge}`} sub="Years at diagnosis" accent="violet" />
-        <KpiCard icon={TrendingUp} label="Median Survival" value={`${POPULATION_STATS.medianSurvival.toLocaleString()}`} sub="Days (overall)" accent="emerald" />
-        <KpiCard icon={GitBranch} label="Active Cohorts" value="5" sub="Stage-stratified groups" accent="amber" />
+        <KpiCard icon={Users} label="Reference Rows" value={TOTAL.toLocaleString()} sub="METABRIC row-count reference only" accent="cyan" />
+        <KpiCard icon={Activity} label="Demo Median Age" value={`${POPULATION_STATS.medianAge}`} sub="Fixed illustrative value" accent="violet" />
+        <KpiCard icon={TrendingUp} label="Demo Median Day" value={`${POPULATION_STATS.medianSurvival.toLocaleString()}`} sub="Synthetic curve summary" accent="emerald" />
+        <KpiCard icon={GitBranch} label="Demo Stage Groups" value="5" sub="Fixed illustrative categories" accent="amber" />
       </div>
 
       {/* ── Row 1: Stage Distribution (donut) + Age Distribution (bar) ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
         {/* Stage Distribution Donut */}
         <GlassCard className="rounded-2xl p-6">
-          <ModuleHeader icon={PieIcon} title="Stage Distribution" subtitle="Cohort breakdown by TNM stage" accent="cyan" />
+          <ModuleHeader icon={PieIcon} title="Synthetic Stage Distribution" subtitle="Fixed illustrative counts by demo stage field" accent="cyan" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
             <div className="relative h-[240px]">
               <ResponsiveContainer width="100%" height="100%">
@@ -267,7 +301,7 @@ export default function Analytics() {
               </ResponsiveContainer>
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                 <span className="font-mono-data text-[28px] font-extrabold text-slate-800">{TOTAL.toLocaleString()}</span>
-                <span className="text-[9px] text-slate-400 uppercase tracking-[0.18em] font-mono-data">Total Patients</span>
+                <span className="text-[9px] text-slate-400 uppercase tracking-[0.18em] font-mono-data">Reference Rows</span>
               </div>
             </div>
             <div className="space-y-2.5">
@@ -303,7 +337,7 @@ export default function Analytics() {
 
         {/* Age Distribution Bar */}
         <GlassCard className="rounded-2xl p-6">
-          <ModuleHeader icon={Users} title="Age Distribution" subtitle="Population by age group at diagnosis" accent="violet" />
+          <ModuleHeader icon={Users} title="Age Distribution" subtitle="Fixed synthetic counts by illustrative age band" accent="violet" />
           <div className="h-[280px]">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={ageData} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
@@ -337,7 +371,7 @@ export default function Analytics() {
 
       {/* ── Row 2: Receptor Status Breakdown (3 small donuts) ── */}
       <GlassCard className="rounded-2xl p-6 mb-6">
-        <ModuleHeader icon={Activity} title="Receptor Status Breakdown" subtitle="ER / HER2 / PR positive-negative ratios across population" accent="emerald" />
+        <ModuleHeader icon={Activity} title="Synthetic Receptor Breakdown" subtitle="Fixed ER / HER2 / PR positive-negative demo ratios" accent="emerald" />
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <ReceptorDonut title="ER Status" positive={POPULATION_STATS.byER.positive} negative={POPULATION_STATS.byER.negative} />
           <ReceptorDonut title="HER2 Status" positive={POPULATION_STATS.byHER2.positive} negative={POPULATION_STATS.byHER2.negative} />
@@ -347,7 +381,7 @@ export default function Analytics() {
 
       {/* ── Row 3: Survival by Stage (multi-line) ── */}
       <GlassCard className="rounded-2xl p-6 mb-6">
-        <ModuleHeader icon={TrendingUp} title="Survival by Stage" subtitle="Synthetic Kaplan-Meier curves · Stage 0 through IV" accent="cyan" />
+        <ModuleHeader icon={TrendingUp} title="Synthetic Curves by Demo Stage" subtitle="Fixed illustrative decay curves · not Kaplan-Meier estimates" accent="cyan" />
         <div className="h-[320px]">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={SURVIVAL_CURVES[0].data.map((_, i) => {
@@ -385,14 +419,14 @@ export default function Analytics() {
         </div>
       </GlassCard>
 
-      {/* ── Row 4: Hazard Distribution (area) + Mutation Burden by Stage (box-plot-like) ── */}
+      {/* ── Row 4: Synthetic Score Distribution + Mutation Burden Illustration ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
-        {/* Hazard Distribution */}
+        {/* Synthetic surrogate-score distribution */}
         <GlassCard className="rounded-2xl p-6">
-          <ModuleHeader icon={Brain} title="Hazard Distribution" subtitle="Synthetic log-hazard density across population" accent="rose" />
+          <ModuleHeader icon={Brain} title="Surrogate Score Distribution" subtitle="Fixed synthetic density · not a measured model result" accent="rose" />
           <div className="h-[260px]">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={HAZARD_DISTRIBUTION} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
+              <AreaChart data={SCORE_DISTRIBUTION} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
                 <defs>
                   <linearGradient id="hazardGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#f43f5e" stopOpacity={0.7} />
@@ -402,7 +436,7 @@ export default function Analytics() {
                 </defs>
                 <CartesianGrid strokeDasharray="2 4" stroke="rgba(148,163,184,0.15)" vertical={false} />
                 <XAxis dataKey="x" stroke="#94a3b8" tick={{ fontSize: 9, fill: '#94a3b8' }} tickLine={false} axisLine={false}
-                  label={{ value: 'Log-Hazard', position: 'insideBottom', offset: -2, style: { fontSize: 9, fill: '#94a3b8' } }} />
+                  label={{ value: 'Synthetic surrogate score', position: 'insideBottom', offset: -2, style: { fontSize: 9, fill: '#94a3b8' } }} />
                 <YAxis stroke="#94a3b8" tick={{ fontSize: 9, fill: '#94a3b8' }} tickLine={false} axisLine={false}
                   label={{ value: 'Density', angle: -90, position: 'insideLeft', offset: 15, style: { fontSize: 9, fill: '#94a3b8' } }} />
                 <Tooltip content={<GenericTooltip suffix="" />} />
@@ -487,7 +521,7 @@ export default function Analytics() {
 
       {/* ── Row 5: Correlation Matrix (heatmap) ── */}
       <GlassCard className="rounded-2xl p-6 mb-6">
-        <ModuleHeader icon={Sparkles} title="Correlation Matrix" subtitle="Pearson correlations between clinical variables" accent="cyan" />
+        <ModuleHeader icon={Sparkles} title="Synthetic Correlation Matrix" subtitle="Fixed illustrative coefficients · not measured associations" accent="cyan" />
         <div className="overflow-x-auto">
           <div className="min-w-[420px]">
             {/* Header row */}
