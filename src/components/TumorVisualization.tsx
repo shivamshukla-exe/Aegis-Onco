@@ -1,153 +1,218 @@
-import { useMemo, useRef } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Environment, Float, MeshDistortMaterial, Points, PointMaterial } from '@react-three/drei';
-import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Float, MeshDistortMaterial, OrbitControls } from '@react-three/drei';
+import { Bloom, EffectComposer, Vignette } from '@react-three/postprocessing';
 import * as THREE from 'three';
 
-// ────────────────────────────────────────────────────────────────────────────
-// Props
-// ────────────────────────────────────────────────────────────────────────────
-
 interface Props {
-  tumorSize: number;   // 1-180mm
-  stage: string;       // 'Stage 0' through 'Stage IV'
-  lymphNodes: number;  // 0-45
+  tumorSize: number;
+  stage: string;
+  lymphNodes: number;
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Stage → color mapping (kept consistent with POPULATION_STATS.byStage in engine.ts
-// and the ACCENT palette in ui.tsx so the 3D scene matches the rest of the app).
-// ────────────────────────────────────────────────────────────────────────────
+interface RenderProfile {
+  lowQuality: boolean;
+  reducedMotion: boolean;
+}
 
 const STAGE_COLORS: Record<string, string> = {
-  'Stage 0': '#10b981',   // emerald  — benign / in-situ
-  'Stage I': '#3b82f6',   // blue     — early
-  'Stage II': '#8b5cf6',  // violet   — regional
-  'Stage III': '#f59e0b', // amber    — advanced
-  'Stage IV': '#f43f5e',  // rose     — metastatic
+  'Stage 0': '#10b981',
+  'Stage I': '#3b82f6',
+  'Stage II': '#8b5cf6',
+  'Stage III': '#f59e0b',
+  'Stage IV': '#f43f5e',
 };
+
+const MAX_PARTICLES = 135;
 
 function stageColor(stage: string): THREE.Color {
   return new THREE.Color(STAGE_COLORS[stage] ?? '#8b5cf6');
 }
 
-// Bloom intensity grows with stage severity (0..4)
 function stageSeverity(stage: string): number {
   const order = ['Stage 0', 'Stage I', 'Stage II', 'Stage III', 'Stage IV'];
-  const idx = order.indexOf(stage);
-  return idx < 0 ? 2 : idx; // 0..4
+  const index = order.indexOf(stage);
+  return index < 0 ? 2 : index;
 }
 
-// Map tumorSize (1..180mm) → radius (0.3..2.0)
 function tumorRadius(tumorSize: number): number {
-  const t = Math.min(Math.max((tumorSize - 1) / (180 - 1), 0), 1);
-  return 0.3 + t * (2.0 - 0.3);
+  const normalized = Math.min(Math.max((tumorSize - 1) / 179, 0), 1);
+  return 0.3 + normalized * 1.7;
+}
+function useRenderProfile(): RenderProfile {
+  const [reducedMotion, setReducedMotion] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  );
+
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => setReducedMotion(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+
+  const lowQuality = useMemo(() => {
+    if (typeof navigator === 'undefined') return false;
+    const device = navigator as Navigator & { deviceMemory?: number };
+    return (device.hardwareConcurrency > 0 && device.hardwareConcurrency <= 4)
+      || (device.deviceMemory !== undefined && device.deviceMemory <= 4);
+  }, []);
+
+  return { lowQuality: lowQuality || reducedMotion, reducedMotion };
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// TumorMesh — distorted icosahedron with a slow breathing pulse + wireframe overlay
-// ────────────────────────────────────────────────────────────────────────────
+function useRenderActivity(containerRef: React.RefObject<HTMLDivElement>): boolean {
+  const [intersecting, setIntersecting] = useState(true);
+  const [pageVisible, setPageVisible] = useState(() =>
+    typeof document === 'undefined' || document.visibilityState !== 'hidden',
+  );
 
-function TumorMesh({ tumorSize, stage }: { tumorSize: number; stage: string }) {
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setIntersecting(entry.isIntersecting),
+      { rootMargin: '80px', threshold: 0.01 },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [containerRef]);
+
+  useEffect(() => {
+    const update = () => setPageVisible(document.visibilityState !== 'hidden');
+    document.addEventListener('visibilitychange', update);
+    return () => document.removeEventListener('visibilitychange', update);
+  }, []);
+
+  return intersecting && pageVisible;
+}
+
+function ContextLifecycle({
+  onLost,
+  onRestored,
+}: {
+  onLost: () => void;
+  onRestored: () => void;
+}) {
+  const { gl } = useThree();
+
+  useEffect(() => {
+    const canvas = gl.domElement;
+    const lost = (event: Event) => {
+      event.preventDefault();
+      onLost();
+    };
+    canvas.addEventListener('webglcontextlost', lost);
+    canvas.addEventListener('webglcontextrestored', onRestored);
+    return () => {
+      canvas.removeEventListener('webglcontextlost', lost);
+      canvas.removeEventListener('webglcontextrestored', onRestored);
+    };
+  }, [gl, onLost, onRestored]);
+
+  return null;
+}
+
+function TumorMesh({
+  tumorSize,
+  stage,
+  profile,
+}: {
+  tumorSize: number;
+  stage: string;
+  profile: RenderProfile;
+}) {
   const meshRef = useRef<THREE.Mesh>(null);
   const wireRef = useRef<THREE.Mesh>(null);
+  const phaseRef = useRef(0);
   const baseRadius = useMemo(() => tumorRadius(tumorSize), [tumorSize]);
   const color = useMemo(() => stageColor(stage), [stage]);
 
-  // Pre-build the distorted icosahedron geometry (detail 4 → smooth-ish irregular sphere)
   const geometry = useMemo(() => {
-    const geo = new THREE.IcosahedronGeometry(baseRadius, 4);
-    // Jitter vertices slightly for organic irregularity (deterministic per radius)
+    const detail = profile.lowQuality ? 2 : 4;
+    const nextGeometry = new THREE.IcosahedronGeometry(baseRadius, detail);
     const seed = baseRadius * 1000;
-    const pos = geo.attributes.position as THREE.BufferAttribute;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i);
-      const y = pos.getY(i);
-      const z = pos.getZ(i);
-      // cheap deterministic pseudo-noise
-      const n = Math.sin(x * 3.1 + seed) * Math.cos(y * 2.7 + seed) * Math.sin(z * 3.3 + seed);
-      const f = 1 + n * 0.08;
-      pos.setXYZ(i, x * f, y * f, z * f);
+    const positions = nextGeometry.attributes.position as THREE.BufferAttribute;
+    for (let index = 0; index < positions.count; index++) {
+      const x = positions.getX(index);
+      const y = positions.getY(index);
+      const z = positions.getZ(index);
+      const noise = Math.sin(x * 3.1 + seed)
+        * Math.cos(y * 2.7 + seed)
+        * Math.sin(z * 3.3 + seed);
+      const scale = 1 + noise * 0.08;
+      positions.setXYZ(index, x * scale, y * scale, z * scale);
     }
-    pos.needsUpdate = true;
-    geo.computeVertexNormals();
-    return geo;
-  }, [baseRadius]);
+    positions.needsUpdate = true;
+    nextGeometry.computeVertexNormals();
+    return nextGeometry;
+  }, [baseRadius, profile.lowQuality]);
 
-  // Wireframe overlay geometry (slightly larger)
-  const wireGeometry = useMemo(() => {
-    return new THREE.IcosahedronGeometry(baseRadius * 1.04, 2);
-  }, [baseRadius]);
+  const wireGeometry = useMemo(
+    () => new THREE.IcosahedronGeometry(baseRadius * 1.04, profile.lowQuality ? 1 : 2),
+    [baseRadius, profile.lowQuality],
+  );
 
-  useFrame((state) => {
-    const t = state.clock.elapsedTime;
-    // Slow breathing: ±5% scale, ~4s period
-    const pulse = 1 + Math.sin(t * (Math.PI * 2) / 4) * 0.05;
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  useEffect(() => () => wireGeometry.dispose(), [wireGeometry]);
+
+  useFrame((_state, frameDelta) => {
+    if (profile.reducedMotion) return;
+    const delta = Math.min(frameDelta, 0.05);
+    phaseRef.current += delta;
+    const pulse = 1 + Math.sin(phaseRef.current * Math.PI * 0.5) * 0.05;
     if (meshRef.current) {
       meshRef.current.scale.setScalar(pulse);
-      meshRef.current.rotation.y = t * 0.08;
-      meshRef.current.rotation.x = Math.sin(t * 0.15) * 0.1;
+      meshRef.current.rotation.y += delta * 0.08;
+      meshRef.current.rotation.x = Math.sin(phaseRef.current * 0.15) * 0.1;
     }
     if (wireRef.current) {
       wireRef.current.scale.setScalar(pulse);
-      wireRef.current.rotation.y = -t * 0.05;
-      wireRef.current.rotation.z = t * 0.03;
+      wireRef.current.rotation.y -= delta * 0.05;
+      wireRef.current.rotation.z += delta * 0.03;
     }
   });
 
   return (
     <group>
-      <mesh ref={meshRef} geometry={geometry} castShadow>
+      <mesh ref={meshRef} geometry={geometry}>
         <MeshDistortMaterial
           color={color}
           emissive={color}
-          emissiveIntensity={0.35}
+          emissiveIntensity={profile.lowQuality ? 0.2 : 0.35}
           roughness={0.35}
           metalness={0.15}
-          distort={0.28}
-          speed={1.4}
+          distort={profile.reducedMotion ? 0 : profile.lowQuality ? 0.14 : 0.28}
+          speed={profile.reducedMotion ? 0 : profile.lowQuality ? 0.7 : 1.4}
         />
       </mesh>
-
-      {/* Subtle wireframe overlay */}
       <mesh ref={wireRef} geometry={wireGeometry}>
-        <meshBasicMaterial
-          color={color}
-          wireframe
-          transparent
-          opacity={0.12}
-          depthWrite={false}
-        />
+        <meshBasicMaterial color={color} wireframe transparent opacity={0.12} depthWrite={false} />
       </mesh>
     </group>
   );
 }
-
-// ────────────────────────────────────────────────────────────────────────────
-// TissueShell — semi-transparent outer boundary (breast tissue)
-// ────────────────────────────────────────────────────────────────────────────
-
-function TissueShell() {
+function TissueShell({ profile }: { profile: RenderProfile }) {
   const ref = useRef<THREE.Mesh>(null);
 
-  useFrame((state) => {
-    const t = state.clock.elapsedTime;
-    if (ref.current) {
-      ref.current.rotation.y = t * 0.04;
-      ref.current.rotation.x = Math.sin(t * 0.1) * 0.05;
-    }
+  useFrame((_state, frameDelta) => {
+    if (!ref.current || profile.reducedMotion) return;
+    const delta = Math.min(frameDelta, 0.05);
+    ref.current.rotation.y += delta * 0.04;
+    ref.current.rotation.x = Math.sin(ref.current.rotation.y * 2.5) * 0.05;
   });
 
   return (
     <mesh ref={ref}>
-      <sphereGeometry args={[2.5, 64, 64]} />
+      <sphereGeometry args={[2.5, profile.lowQuality ? 24 : 48, profile.lowQuality ? 16 : 32]} />
       <meshPhysicalMaterial
         color="#f8c8d0"
         transparent
         opacity={0.06}
         roughness={0.4}
         metalness={0}
-        transmission={0.9}
+        transmission={profile.lowQuality ? 0.3 : 0.9}
         thickness={0.5}
         ior={1.2}
         side={THREE.BackSide}
@@ -157,96 +222,125 @@ function TissueShell() {
   );
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// MetastaticParticles — N = lymphNodes * 3 glowing points that orbit + drift out
-// ────────────────────────────────────────────────────────────────────────────
-
 interface Particle {
   orbitRadius: number;
   angle: number;
-  angularVel: number;
-  inclination: number;   // latitude offset
-  drift: number;         // outward drift speed
-  driftPhase: number;    // phase offset for the breathing reset
-  size: number;
+  angularVelocity: number;
+  inclination: number;
+  drift: number;
+  driftPhase: number;
 }
 
-function MetastaticParticles({ lymphNodes }: { lymphNodes: number }) {
-  const count = Math.min(Math.max(lymphNodes * 3, 0), 135);
-  const pointsRef = useRef<THREE.Points>(null);
+function seededUnit(index: number, channel: number): number {
+  let value = Math.imul(index + 1, 0x9e3779b1) ^ Math.imul(channel + 11, 0x85ebca6b);
+  value = Math.imul(value ^ (value >>> 16), 0x7feb352d);
+  value = Math.imul(value ^ (value >>> 15), 0x846ca68b);
+  return ((value ^ (value >>> 16)) >>> 0) / 4294967296;
+}
 
-  // Build particle state + the BufferGeometry positions
-  const { particles, positions, colors } = useMemo(() => {
+function DemoParticles({
+  lymphNodes,
+  reducedMotion,
+}: {
+  lymphNodes: number;
+  reducedMotion: boolean;
+}) {
+  const visibleCount = Math.min(Math.max(Math.round(lymphNodes) * 3, 0), MAX_PARTICLES);
+  const renderedCountRef = useRef(reducedMotion ? visibleCount : 0);
+  const elapsedRef = useRef(0);
+  const closeColor = useMemo(() => new THREE.Color('#f43f5e'), []);
+  const farColor = useMemo(() => new THREE.Color('#f59e0b'), []);
+  const mixedColor = useMemo(() => new THREE.Color(), []);
+
+  const pool = useMemo(() => {
     const particles: Particle[] = [];
-    const positions = new Float32Array(Math.max(count, 1) * 3);
-    const colors = new Float32Array(Math.max(count, 1) * 3);
+    const positions = new Float32Array(MAX_PARTICLES * 3);
+    const colors = new Float32Array(MAX_PARTICLES * 3);
 
-    for (let i = 0; i < count; i++) {
-      const orbitRadius = 0.9 + Math.random() * 1.4;
-      const angle = Math.random() * Math.PI * 2;
-      const angularVel = (0.15 + Math.random() * 0.35) * (Math.random() > 0.5 ? 1 : -1);
-      const inclination = (Math.random() - 0.5) * Math.PI * 0.6;
-      const drift = 0.05 + Math.random() * 0.12;
-      const driftPhase = Math.random() * Math.PI * 2;
-      const size = 0.6 + Math.random() * 0.8;
+    for (let index = 0; index < MAX_PARTICLES; index++) {
+      const particle: Particle = {
+        orbitRadius: 0.9 + seededUnit(index, 0) * 1.4,
+        angle: seededUnit(index, 1) * Math.PI * 2,
+        angularVelocity: (0.15 + seededUnit(index, 2) * 0.35)
+          * (seededUnit(index, 3) > 0.5 ? 1 : -1),
+        inclination: (seededUnit(index, 4) - 0.5) * Math.PI * 0.6,
+        drift: 0.05 + seededUnit(index, 5) * 0.12,
+        driftPhase: seededUnit(index, 6) * Math.PI * 2,
+      };
+      particles.push(particle);
 
-      particles.push({ orbitRadius, angle, angularVel, inclination, drift, driftPhase, size });
-
-      // initial position (will be overwritten in useFrame anyway)
-      positions[i * 3] = 0;
-      positions[i * 3 + 1] = 0;
-      positions[i * 3 + 2] = 0;
-
-      // close = red, far = fading orange (set per-frame, but seed a sane default)
-      const c = new THREE.Color('#f43f5e');
-      colors[i * 3] = c.r;
-      colors[i * 3 + 1] = c.g;
-      colors[i * 3 + 2] = c.b;
+      const x = Math.cos(particle.angle) * Math.cos(particle.inclination) * particle.orbitRadius;
+      const y = Math.sin(particle.inclination) * particle.orbitRadius;
+      const z = Math.sin(particle.angle) * Math.cos(particle.inclination) * particle.orbitRadius;
+      positions.set([x, y, z], index * 3);
+      const initial = closeColor.clone().lerp(farColor, (particle.orbitRadius - 0.9) / 1.4);
+      colors.set([initial.r, initial.g, initial.b], index * 3);
     }
-    return { particles, positions, colors };
-  }, [count]);
 
-  // Reusable color objects to avoid per-frame allocation
-  const colClose = useMemo(() => new THREE.Color('#f43f5e'), []); // red
-  const colFar = useMemo(() => new THREE.Color('#f59e0b'), []);   // fading orange
-  const tmpColor = useMemo(() => new THREE.Color(), []);
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setDrawRange(0, renderedCountRef.current);
+    return { particles, geometry };
+    // The pool is intentionally created once: count changes only reveal stable identities.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  useFrame((state) => {
-    const t = state.clock.elapsedTime;
-    if (!pointsRef.current) return;
-    const posAttr = pointsRef.current.geometry.attributes.position as THREE.BufferAttribute;
-    const colAttr = pointsRef.current.geometry.attributes.color as THREE.BufferAttribute;
-
-    for (let i = 0; i < particles.length; i++) {
-      const p = particles[i];
-      p.angle += p.angularVel * 0.016; // ~frame delta
-
-      // Breathing outward drift with a slow reset cycle so particles don't escape forever
-      const cycle = (t * p.drift + p.driftPhase) % (Math.PI * 2);
-      const driftFactor = (1 - Math.cos(cycle)) * 0.5; // 0..1..0
-      const r = p.orbitRadius + driftFactor * 0.9;
-
-      const x = Math.cos(p.angle) * Math.cos(p.inclination) * r;
-      const y = Math.sin(p.inclination) * r;
-      const z = Math.sin(p.angle) * Math.cos(p.inclination) * r;
-
-      posAttr.setXYZ(i, x, y, z);
-
-      // Color by distance from center: close → red, far → fading orange
-      const dist = Math.sqrt(x * x + y * y + z * z);
-      const dn = Math.min(Math.max((dist - 0.9) / 1.6, 0), 1);
-      tmpColor.copy(colClose).lerp(colFar, dn);
-      colAttr.setXYZ(i, tmpColor.r, tmpColor.g, tmpColor.b);
+  useEffect(() => {
+    if (reducedMotion) {
+      renderedCountRef.current = visibleCount;
+      pool.geometry.setDrawRange(0, visibleCount);
     }
-    posAttr.needsUpdate = true;
-    colAttr.needsUpdate = true;
+  }, [pool.geometry, reducedMotion, visibleCount]);
+
+  useEffect(() => () => pool.geometry.dispose(), [pool.geometry]);
+
+  useFrame((_state, frameDelta) => {
+    const delta = Math.min(frameDelta, 0.05);
+    const previousCount = renderedCountRef.current;
+    if (!reducedMotion && previousCount !== visibleCount) {
+      const difference = visibleCount - previousCount;
+      const nextCount = previousCount
+        + Math.sign(difference) * Math.min(Math.abs(difference), delta * 45);
+      renderedCountRef.current = Math.abs(visibleCount - nextCount) < 0.01
+        ? visibleCount
+        : nextCount;
+      const drawCount = difference > 0
+        ? Math.floor(renderedCountRef.current)
+        : Math.ceil(renderedCountRef.current);
+      pool.geometry.setDrawRange(0, drawCount);
+    }
+
+    if (reducedMotion) return;
+    elapsedRef.current += delta;
+    const positions = pool.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const colors = pool.geometry.getAttribute('color') as THREE.BufferAttribute;
+
+    const activeCount = Math.min(
+      pool.particles.length,
+      Math.max(visibleCount, Math.ceil(renderedCountRef.current)),
+    );
+    for (let index = 0; index < activeCount; index++) {
+      const particle = pool.particles[index];
+      particle.angle += particle.angularVelocity * delta;
+      const cycle = (elapsedRef.current * particle.drift + particle.driftPhase) % (Math.PI * 2);
+      const radius = particle.orbitRadius + (1 - Math.cos(cycle)) * 0.45;
+      const x = Math.cos(particle.angle) * Math.cos(particle.inclination) * radius;
+      const y = Math.sin(particle.inclination) * radius;
+      const z = Math.sin(particle.angle) * Math.cos(particle.inclination) * radius;
+      positions.setXYZ(index, x, y, z);
+
+      const distanceRatio = Math.min(Math.max((radius - 0.9) / 1.6, 0), 1);
+      mixedColor.copy(closeColor).lerp(farColor, distanceRatio);
+      colors.setXYZ(index, mixedColor.r, mixedColor.g, mixedColor.b);
+    }
+    positions.needsUpdate = true;
+    colors.needsUpdate = true;
   });
 
-  if (count === 0) return null;
-
   return (
-    <Points ref={pointsRef as any} positions={positions} colors={colors} stride={3}>
-      <PointMaterial
+    <points geometry={pool.geometry} frustumCulled={false}>
+      <pointsMaterial
         vertexColors
         transparent
         size={0.08}
@@ -254,84 +348,156 @@ function MetastaticParticles({ lymphNodes }: { lymphNodes: number }) {
         depthWrite={false}
         blending={THREE.AdditiveBlending}
       />
-    </Points>
+    </points>
   );
 }
-
-// ────────────────────────────────────────────────────────────────────────────
-// SceneLighting — ambient + stage-colored point light at tumor + top directional
-// ────────────────────────────────────────────────────────────────────────────
-
-function SceneLighting({ stage }: { stage: string }) {
+function SceneLighting({ stage, lowQuality }: { stage: string; lowQuality: boolean }) {
   const color = useMemo(() => stageColor(stage), [stage]);
   return (
     <>
-      <ambientLight intensity={0.25} />
-      <pointLight position={[0, 0, 0]} color={color} intensity={2.2} distance={6} decay={2} />
-      <directionalLight position={[3, 6, 4]} intensity={0.7} color="#ffffff" castShadow />
-      <directionalLight position={[-4, 2, -3]} intensity={0.25} color="#a5b4fc" />
+      <ambientLight intensity={lowQuality ? 0.4 : 0.25} />
+      <pointLight position={[0, 0, 0]} color={color} intensity={lowQuality ? 1.5 : 2.2} distance={6} decay={2} />
+      <directionalLight position={[3, 6, 4]} intensity={0.7} color="#ffffff" />
+      {!lowQuality && <directionalLight position={[-4, 2, -3]} intensity={0.25} color="#a5b4fc" />}
     </>
   );
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Scene — everything inside the Canvas (so we can use useFrame via drei <Float>)
-// ────────────────────────────────────────────────────────────────────────────
-
-function Scene({ tumorSize, stage, lymphNodes }: Props) {
+function Scene({
+  tumorSize,
+  stage,
+  lymphNodes,
+  profile,
+  onContextLost,
+  onContextRestored,
+}: Props & {
+  profile: RenderProfile;
+  onContextLost: () => void;
+  onContextRestored: () => void;
+}) {
   const bloomIntensity = useMemo(() => 0.4 + stageSeverity(stage) * 0.28, [stage]);
+  const tumor = (
+    <>
+      <TumorMesh tumorSize={tumorSize} stage={stage} profile={profile} />
+      <TissueShell profile={profile} />
+      <DemoParticles lymphNodes={lymphNodes} reducedMotion={profile.reducedMotion} />
+    </>
+  );
 
   return (
     <>
-      <SceneLighting stage={stage} />
+      <ContextLifecycle onLost={onContextLost} onRestored={onContextRestored} />
+      <SceneLighting stage={stage} lowQuality={profile.lowQuality} />
 
-      <Float speed={1.1} rotationIntensity={0.25} floatIntensity={0.35} floatingRange={[-0.08, 0.08]}>
-        <TumorMesh tumorSize={tumorSize} stage={stage} />
-        <TissueShell />
-        <MetastaticParticles lymphNodes={lymphNodes} />
-      </Float>
-
-      <Environment preset="city" />
+      {profile.reducedMotion ? (
+        <group>{tumor}</group>
+      ) : (
+        <Float
+          speed={profile.lowQuality ? 0.65 : 1.1}
+          rotationIntensity={profile.lowQuality ? 0.1 : 0.25}
+          floatIntensity={profile.lowQuality ? 0.15 : 0.35}
+          floatingRange={[-0.08, 0.08]}
+        >
+          {tumor}
+        </Float>
+      )}
 
       <OrbitControls
-        autoRotate
+        autoRotate={!profile.reducedMotion}
         autoRotateSpeed={0.5}
-        enableZoom
-        minDistance={3.5}
-        maxDistance={9}
+        enableZoom={false}
         enablePan={false}
         minPolarAngle={Math.PI * 0.15}
         maxPolarAngle={Math.PI * 0.75}
         dampingFactor={0.08}
       />
 
-      <EffectComposer>
-        <Bloom
-          intensity={bloomIntensity}
-          luminanceThreshold={0.15}
-          luminanceSmoothing={0.5}
-          mipmapBlur
-        />
-        <Vignette eskil={false} offset={0.25} darkness={0.65} />
-      </EffectComposer>
+      {!profile.lowQuality && (
+        <EffectComposer>
+          <Bloom
+            intensity={bloomIntensity}
+            luminanceThreshold={0.15}
+            luminanceSmoothing={0.5}
+            mipmapBlur
+          />
+          <Vignette eskil={false} offset={0.25} darkness={0.65} />
+        </EffectComposer>
+      )}
     </>
   );
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// TumorVisualization — default export. Dark transparent canvas to blend with the
-// glassmorphism theme.
-// ────────────────────────────────────────────────────────────────────────────
+function VisualizationFallback({ contextLost = false }: { contextLost?: boolean }) {
+  return (
+    <div
+      role="status"
+      style={{
+        alignItems: 'center',
+        background: 'radial-gradient(circle, rgba(139,92,246,0.18), transparent 65%)',
+        color: '#a5b4fc',
+        display: 'flex',
+        fontSize: '0.875rem',
+        inset: 0,
+        justifyContent: 'center',
+        padding: '1rem',
+        position: 'absolute',
+        textAlign: 'center',
+      }}
+    >
+      {contextLost
+        ? '3D context was interrupted. Waiting for the browser to restore it…'
+        : '3D visualization is unavailable on this device.'}
+    </div>
+  );
+}
 
 export default function TumorVisualization({ tumorSize, stage, lymphNodes }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const profile = useRenderProfile();
+  const isVisible = useRenderActivity(containerRef);
+  const [contextLost, setContextLost] = useState(false);
+  const handleContextLost = useCallback(() => setContextLost(true), []);
+  const handleContextRestored = useCallback(() => setContextLost(false), []);
+  const webGLAvailable = typeof window !== 'undefined'
+    && ('WebGLRenderingContext' in window || 'WebGL2RenderingContext' in window);
+  const frameloop = !isVisible || contextLost
+    ? 'never'
+    : profile.reducedMotion
+      ? 'demand'
+      : 'always';
+
   return (
-    <Canvas
-      camera={{ position: [0, 0.5, 6], fov: 45, near: 0.1, far: 100 }}
-      gl={{ alpha: true, antialias: true, powerPreference: 'high-performance' }}
-      style={{ background: 'transparent' }}
-      dpr={[1, 2]}
-    >
-      <Scene tumorSize={tumorSize} stage={stage} lymphNodes={lymphNodes} />
-    </Canvas>
+    <div ref={containerRef} style={{ height: '100%', position: 'relative', width: '100%' }}>
+      {webGLAvailable ? (
+        <Canvas
+          camera={{ position: [0, 0.5, 6], fov: 45, near: 0.1, far: 100 }}
+          dpr={profile.lowQuality ? [1, 1.25] : [1, 1.5]}
+          fallback={<VisualizationFallback />}
+          frameloop={frameloop}
+          gl={{
+            alpha: true,
+            antialias: !profile.lowQuality,
+            failIfMajorPerformanceCaveat: true,
+            powerPreference: profile.lowQuality ? 'low-power' : 'high-performance',
+          }}
+          style={{ background: 'transparent' }}
+        >
+          <Scene
+            tumorSize={tumorSize}
+            stage={stage}
+            lymphNodes={lymphNodes}
+            profile={profile}
+            onContextLost={handleContextLost}
+            onContextRestored={handleContextRestored}
+          />
+        </Canvas>
+      ) : (
+        <VisualizationFallback />
+      )}
+      {contextLost && <VisualizationFallback contextLost />}
+      <div className="pointer-events-none absolute bottom-3 left-3 right-3 rounded-lg border border-white/10 bg-slate-950/65 px-3 py-2 text-center font-mono-data text-[9px] uppercase tracking-wider text-slate-200">
+        Stylized synthetic visualization · not scan-derived imaging or anatomical evidence
+      </div>
+    </div>
   );
 }

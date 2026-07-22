@@ -9,9 +9,9 @@ export interface CurvePoint {
   range: [number, number];
 }
 
-export interface MCHazard {
-  meanHazard: number;
-  uncertaintyStd: number;
+export interface SeededVariation {
+  meanSurrogateScore: number;
+  variationStd: number;
   samples: number[];
 }
 
@@ -35,6 +35,16 @@ export interface PatientInput {
   intervention: Intervention;
 }
 
+export type QualityFlag = 'none' | 'incomplete_staging' | 'boundary_warning' | 'high_variation';
+
+export interface PredictionMetadata {
+  modelVersion: string;
+  schemaVersion: string;
+  predictionRunId: string;
+  dataCompleteness: number;
+  qualityFlag: QualityFlag;
+}
+
 export interface PatientRecord {
   id: string;
   patient_code: string;
@@ -55,10 +65,46 @@ export interface PatientRecord {
   her2_status: Status;
   pr_status: Status;
   intervention: Intervention;
-  mean_hazard: number;
-  uncertainty_std: number;
+  surrogate_score: number;
+  variation_std: number;
   median_os: number | null;
   day1095_survival: number;
+  model_version: string;
+  feature_schema_version: string;
+  prediction_run_id: string;
+  prediction_timestamp: string;
+  synthetic_data: true;
+  data_completeness: number;
+  quality_flag: QualityFlag;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface PredictionRun {
+  id: string;
+  prediction_run_id: string;
+  patient_id: string | null;
+  patient_code: string;
+  model_version: string;
+  schema_version: string;
+  data_completeness: number;
+  quality_flag: QualityFlag;
+  inputs: Record<string, unknown>;
+  outputs: Record<string, unknown>;
+  synthetic_data: true;
+  created_at: string;
+}
+
+export type AuditAction = 'create' | 'update' | 'delete';
+
+export interface AuditEvent {
+  id: string;
+  action: AuditAction;
+  patient_id: string | null;
+  patient_code: string;
+  actor_type: 'anonymous_demo';
+  details: Record<string, unknown>;
   created_at: string;
 }
 

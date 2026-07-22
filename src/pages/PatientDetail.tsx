@@ -10,17 +10,18 @@ import {
 import {
   UserCircle, ArrowLeft, Activity, Dna, Microscope, FlaskConical,
   Calendar, ShieldCheck, AlertTriangle, HeartPulse, Brain, FileText,
-  TrendingUp, Clock,
+  TrendingUp, Clock, Download, History,
 } from 'lucide-react';
 import {
   PageHeader, GlassCard, ModuleHeader,
 } from '../components/ui';
 import {
-  type PatientRecord, type PatientInput, type Stage, type Status,
+  type PatientRecord, type PatientInput, type PredictionRun, type Stage, type Status,
   INTERVENTIONS, STAGE_MAP,
 } from '../lib/types';
 import { runFullEngine, generateSurvivalCurve } from '../lib/engine';
 import { supabase } from '../lib/supabase';
+import { PATIENT_COLUMNS } from '../lib/researchPlatform';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -182,20 +183,19 @@ function HeroSection({ patient, curve, medianDay }: {
   curve: ReturnType<typeof generateSurvivalCurve>;
   medianDay: number | null;
 }) {
-  // Hazard gauge: normalize mean_hazard to a 0-100 "risk score"
-  // Typical mean_hazard range roughly [-1, 3]; map to 0-100
-  const hazardScore = Math.max(0, Math.min(100, ((patient.mean_hazard + 1) / 4) * 100));
-  const hazardPct = hazardScore.toFixed(0);
+  // Display-only normalization of the hand-authored surrogate score to a 0–100 gauge.
+  const normalizedScore = Math.max(0, Math.min(100, ((patient.surrogate_score + 1) / 4) * 100));
+  const normalizedScoreLabel = normalizedScore.toFixed(0);
 
   // Day-1095 survival
   const day1095 = patient.day1095_survival;
   const day1095Color = day1095 < 30 ? '#f43f5e' : day1095 < 60 ? '#f59e0b' : '#10b981';
 
-  // Uncertainty
-  const unc = patient.uncertainty_std;
-  const uncDanger = unc > 0.8;
+  // Seeded UI variation; this is not statistical uncertainty or confidence.
+  const variation = patient.variation_std;
+  const variationWarning = variation > 0.8;
 
-  const gaugeData = [{ name: 'risk', value: hazardScore, fill: hazardScore > 66 ? '#f43f5e' : hazardScore > 40 ? '#f59e0b' : '#10b981' }];
+  const gaugeData = [{ name: 'surrogate', value: normalizedScore, fill: normalizedScore > 66 ? '#f43f5e' : normalizedScore > 40 ? '#f59e0b' : '#10b981' }];
 
   return (
     <GlassCard accent="blue" className="rounded-3xl p-6 overflow-hidden relative">
@@ -238,18 +238,18 @@ function HeroSection({ patient, curve, medianDay }: {
             </div>
           </div>
 
-          {/* Uncertainty + day 1095 */}
+          {/* Seeded variation + day 1095 */}
           <div className="grid grid-cols-2 gap-3 mt-5">
             <div className="rounded-2xl bg-white/60 border border-slate-200/60 p-3.5">
               <div className="flex items-center gap-1.5 mb-1">
-                {uncDanger ? <AlertTriangle size={12} className="text-rose-500" /> : <ShieldCheck size={12} className="text-emerald-500" />}
-                <span className="text-[9px] uppercase tracking-wider font-mono-data font-bold text-slate-400">Uncertainty σ</span>
+                {variationWarning ? <AlertTriangle size={12} className="text-rose-500" /> : <ShieldCheck size={12} className="text-emerald-500" />}
+                <span className="text-[9px] uppercase tracking-wider font-mono-data font-bold text-slate-400">Seeded Variation σ</span>
               </div>
-              <div className={`font-mono-data text-[20px] font-extrabold ${uncDanger ? 'text-rose-500' : 'text-slate-700'}`}>
-                {unc.toFixed(3)}
+              <div className={`font-mono-data text-[20px] font-extrabold ${variationWarning ? 'text-rose-500' : 'text-slate-700'}`}>
+                {variation.toFixed(3)}
               </div>
               <div className="text-[9px] text-slate-400 font-mono-data mt-0.5">
-                {uncDanger ? 'High epistemic risk' : 'Within tolerance'}
+                {variationWarning ? 'Above display threshold' : 'Below display threshold'}
               </div>
             </div>
             <div className="rounded-2xl bg-white/60 border border-slate-200/60 p-3.5">
@@ -267,10 +267,10 @@ function HeroSection({ patient, curve, medianDay }: {
           </div>
         </div>
 
-        {/* Middle: hazard gauge */}
+        {/* Middle: normalized surrogate-score gauge */}
         <div className="lg:col-span-3 flex flex-col items-center justify-center">
           <div className="text-[10px] font-mono-data uppercase tracking-[0.18em] text-slate-400 font-bold mb-2">
-            Mean Hazard Gauge
+            Surrogate Score Gauge
           </div>
           <div className="relative w-[180px] h-[180px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -292,19 +292,19 @@ function HeroSection({ patient, curve, medianDay }: {
             </ResponsiveContainer>
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
               <span className="font-mono-data text-[30px] font-extrabold text-slate-800 leading-none">
-                {hazardPct}
+                {normalizedScoreLabel}
               </span>
-              <span className="text-[9px] font-mono-data uppercase tracking-wider text-slate-400 mt-1">risk score</span>
+              <span className="text-[9px] font-mono-data uppercase tracking-wider text-slate-400 mt-1">normalized demo score</span>
               <span className="font-mono-data text-[11px] font-bold text-slate-600 mt-1.5">
-                μ = {patient.mean_hazard.toFixed(3)}
+                μ = {patient.surrogate_score.toFixed(3)}
               </span>
             </div>
           </div>
           <div className="text-[10px] text-slate-400 font-mono-data mt-2 text-center">
             {medianDay !== null ? (
-              <>Median OS ≈ <span className="font-bold text-slate-600">{medianDay} days</span></>
+              <>Synthetic 50% crossing: <span className="font-bold text-slate-600">day {medianDay}</span></>
             ) : (
-              <>Median OS not reached</>
+              <>No 50% crossing in demo horizon</>
             )}
           </div>
         </div>
@@ -348,7 +348,7 @@ function HeroSection({ patient, curve, medianDay }: {
                   dataKey="range"
                   fill="url(#heroRangeArea)"
                   stroke="none"
-                  name="95% CI"
+                  name="Simulation range"
                 />
                 <Area
                   type="monotone"
@@ -363,7 +363,7 @@ function HeroSection({ patient, curve, medianDay }: {
           </div>
           <div className="flex items-center justify-center gap-4 mt-1 text-[9px] font-mono-data text-slate-400">
             <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-blue-500" />Survival</span>
-            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-slate-400/40" />95% CI</span>
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-slate-400/40" />Simulation range</span>
             <span className="flex items-center gap-1.5"><span className="w-2.5 h-0.5 bg-rose-500" />50% line</span>
           </div>
         </div>
@@ -511,9 +511,9 @@ function GenomicCard({ patient, radarData }: {
 // ─────────────────────────────────────────────────────────────────────────────
 function ReceptorCard({ patient }: { patient: PatientRecord }) {
   const receptors: { label: string; status: Status; key: 'ER' | 'HER2' | 'PR'; desc: string }[] = [
-    { label: 'Estrogen Receptor (ER)', status: patient.er_status, key: 'ER', desc: 'Hormone therapy responsiveness' },
-    { label: 'HER2 Receptor', status: patient.her2_status, key: 'HER2', desc: 'Targeted therapy eligibility' },
-    { label: 'Progesterone Receptor (PR)', status: patient.pr_status, key: 'PR', desc: 'Endocrine responsiveness' },
+    { label: 'Estrogen Receptor (ER)', status: patient.er_status, key: 'ER', desc: 'Stored synthetic receptor-status field' },
+    { label: 'HER2 Receptor', status: patient.her2_status, key: 'HER2', desc: 'Stored synthetic receptor-status field' },
+    { label: 'Progesterone Receptor (PR)', status: patient.pr_status, key: 'PR', desc: 'Stored synthetic receptor-status field' },
   ];
 
   return (
@@ -553,7 +553,10 @@ function TreatmentCard({ patient, interventions }: {
 
   return (
     <GlassCard className="rounded-3xl p-5">
-      <ModuleHeader icon={FlaskConical} title="Treatment Comparison" subtitle="Module 4 · Counterfactual Intervention" accent="amber" />
+      <ModuleHeader icon={FlaskConical} title="Non-Causal Scenario Comparison" subtitle="Module 4 · Arbitrary Browser-Surrogate Offsets" accent="amber" />
+      <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50/80 p-3 text-[10px] leading-relaxed text-amber-900 font-mono-data">
+        Descriptive demo only: these scenarios do not estimate treatment effects and must not guide therapy selection.
+      </div>
 
       {/* Current intervention highlight */}
       <div className="rounded-2xl bg-amber-50/60 border border-amber-200/60 p-4 mb-5 flex items-center justify-between">
@@ -562,12 +565,12 @@ function TreatmentCard({ patient, interventions }: {
             <FlaskConical size={18} className="text-amber-600" />
           </div>
           <div>
-            <div className="text-[9px] uppercase tracking-wider font-mono-data font-bold text-amber-500/70">Current Intervention</div>
+            <div className="text-[9px] uppercase tracking-wider font-mono-data font-bold text-amber-500/70">Stored Demo Scenario</div>
             <div className="text-[13px] font-mono-data font-bold text-slate-800">{patient.intervention}</div>
           </div>
         </div>
         <div className="text-right">
-          <div className="text-[9px] uppercase tracking-wider font-mono-data font-bold text-slate-400">Projected Median OS</div>
+          <div className="text-[9px] uppercase tracking-wider font-mono-data font-bold text-slate-400">Synthetic 50% Curve Crossing</div>
           <div className="font-mono-data text-[16px] font-extrabold text-amber-600">
             {interventions[currentIdx]?.medianDay ?? '—'} {interventions[currentIdx]?.medianDay ? 'days' : ''}
           </div>
@@ -640,16 +643,10 @@ function TreatmentCard({ patient, interventions }: {
 // ─────────────────────────────────────────────────────────────────────────────
 function NarrativeCard({ patient, interventions }: {
   patient: PatientRecord;
-  interventions: { name: string; medianDay: number | null; meanHazard: number }[];
+  interventions: { name: string; medianDay: number | null; surrogateScore: number }[];
 }) {
   const narrative = useMemo(() => {
     const current = interventions.find((i) => i.name === patient.intervention);
-    const best = interventions.reduce((a, b) => (b.meanHazard < a.meanHazard ? b : a), interventions[0]);
-    const worst = interventions.reduce((a, b) => (b.meanHazard > a.meanHazard ? b : a), interventions[0]);
-
-    const hazardReduction = current && best
-      ? ((worst.meanHazard - current.meanHazard) / Math.abs(worst.meanHazard || 0.01)) * 100
-      : 0;
 
     const geneDescriptors: string[] = [];
     const addGene = (name: string, z: number) => {
@@ -666,19 +663,17 @@ function NarrativeCard({ patient, interventions }: {
       : 'Genomic analysis shows all four exposed genes within normal expression ranges.';
 
     const medianStr = current?.medianDay != null
-      ? `a median overall survival of ${current.medianDay} days`
-      : 'median overall survival not reached within the simulation horizon';
+      ? `a synthetic 50% curve crossing at day ${current.medianDay}`
+      : 'no 50% crossing within the synthetic curve horizon';
 
-    const interventionStr = best.name !== patient.intervention
-      ? ` The ${best.name} intervention shows a projected hazard reduction of ${Math.max(0, hazardReduction).toFixed(1)}% relative to the highest-risk option.`
-      : ` The current ${patient.intervention} intervention represents the lowest projected hazard among the simulated strategies.`;
+    const scenarioBoundary = ' Scenario comparisons use arbitrary browser-surrogate offsets, are non-causal, and do not estimate treatment benefit.';
 
-    return `Patient ${patient.patient_code} is a ${patient.age}-year-old presenting with ${patient.stage} breast cancer. The tumor measures ${patient.tumor_size}mm with ${patient.lymph_nodes} positive lymph node${patient.lymph_nodes === 1 ? '' : 's'}. Nottingham Prognostic Index: ${patient.npi.toFixed(1)}. ${geneStr} The patient is ER-${patient.er_status.toLowerCase()}, HER2-${patient.her2_status.toLowerCase()}, PR-${patient.pr_status.toLowerCase()}. Under ${patient.intervention}, the model projects ${medianStr} with 95% CI.${interventionStr}`;
+    return `Synthetic record ${patient.patient_code} contains age ${patient.age}, demo stage ${patient.stage}, tumor-size variable ${patient.tumor_size}mm, ${patient.lymph_nodes} positive-node variable${patient.lymph_nodes === 1 ? '' : 's'}, and NPI ${patient.npi.toFixed(1)}. The exposed demo gene fields are ${geneStr.toLowerCase()} Receptor fields are ER-${patient.er_status.toLowerCase()}, HER2-${patient.her2_status.toLowerCase()}, and PR-${patient.pr_status.toLowerCase()}. Under the stored demo scenario ${patient.intervention}, the surrogate produces ${medianStr}. This is a seeded simulation output, not a confidence interval or prognosis.${scenarioBoundary}`;
   }, [patient, interventions]);
 
   return (
     <GlassCard className="rounded-3xl p-5">
-      <ModuleHeader icon={FileText} title="Clinical Narrative" subtitle="AI-Generated Prognostic Summary" accent="blue" />
+      <ModuleHeader icon={FileText} title="Generated Research Summary" subtitle="Deterministic Template · Not Medical Advice" accent="blue" />
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -708,14 +703,14 @@ function TimelineCard({ patient, medianDay }: {
   const createdAt = new Date(patient.created_at);
 
   const milestones: { label: string; date: Date; icon: typeof Calendar; color: string; projected?: boolean }[] = [
-    { label: 'Diagnosis Date', date: createdAt, icon: Calendar, color: '#3b82f6' },
-    { label: 'Staging Date', date: addDays(createdAt, 3), icon: Microscope, color: '#8b5cf6' },
-    { label: 'Treatment Start', date: addDays(createdAt, 10), icon: FlaskConical, color: '#f59e0b' },
+    { label: 'Synthetic record created', date: createdAt, icon: Calendar, color: '#3b82f6' },
+    { label: 'Demo staging field checkpoint', date: addDays(createdAt, 3), icon: Microscope, color: '#8b5cf6' },
+    { label: 'Scenario-offset checkpoint', date: addDays(createdAt, 10), icon: FlaskConical, color: '#f59e0b' },
   ];
 
   if (medianDay != null) {
     milestones.push({
-      label: 'Projected Median OS',
+      label: 'Synthetic 50% curve crossing',
       date: addDays(createdAt, 10 + medianDay),
       icon: TrendingUp,
       color: '#f43f5e',
@@ -723,7 +718,7 @@ function TimelineCard({ patient, medianDay }: {
     });
   }
   milestones.push({
-    label: '3-Year Survival Milestone',
+    label: 'Day-1095 demo curve checkpoint',
     date: addDays(createdAt, 10 + 1095),
     icon: HeartPulse,
     color: '#10b981',
@@ -732,7 +727,7 @@ function TimelineCard({ patient, medianDay }: {
 
   return (
     <GlassCard className="rounded-3xl p-5">
-      <ModuleHeader icon={Clock} title="Clinical Timeline" subtitle="Observed & Projected Milestones" accent="cyan" />
+      <ModuleHeader icon={Clock} title="Synthetic Event Timeline" subtitle="Illustrative Dates · Not a Care Timeline" accent="cyan" />
       <div className="relative pl-8">
         {/* Vertical line */}
         <div className="absolute left-3 top-2 bottom-2 w-px bg-gradient-to-b from-blue-200 via-violet-200 to-emerald-200" />
@@ -816,6 +811,103 @@ function ErrorState({ message, onBack }: { message: string; onBack: () => void }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Prediction provenance and research-use boundary
+// ─────────────────────────────────────────────────────────────────────────────
+function ProvenanceCard({ patient }: { patient: PatientRecord }) {
+  const completeness = patient.data_completeness;
+  const qualityLabel = patient.quality_flag === 'none'
+    ? 'No heuristic warning'
+    : patient.quality_flag === 'incomplete_staging'
+      ? 'Stage field unavailable'
+      : patient.quality_flag === 'high_variation'
+        ? 'Seeded variation exceeds the display threshold'
+        : 'Input is near a configured UI boundary';
+  const fields = [
+    ['Model version', patient.model_version],
+    ['Feature schema', patient.feature_schema_version],
+    ['Prediction run', patient.prediction_run_id],
+    ['Input-field completeness', `${completeness.toFixed(1)}%`],
+    ['Heuristic UI flag', patient.quality_flag.replace(/_/g, ' ')],
+    ['Prediction time', format(new Date(patient.prediction_timestamp), 'MMM d, yyyy · HH:mm:ss')],
+    ['Last updated', format(new Date(patient.updated_at), 'MMM d, yyyy · HH:mm:ss')],
+    ['Data classification', patient.synthetic_data ? 'Synthetic / demo' : 'Invalid classification'],
+  ];
+  const qualityOk = patient.quality_flag === 'none' && completeness >= 95;
+  return (
+    <GlassCard accent="amber" className="rounded-3xl p-5">
+      <ModuleHeader icon={FileText} title="Prediction Provenance" subtitle="Phase 4 · Reproducibility Metadata" accent="amber" />
+      <div className={`mb-4 flex items-start gap-3 rounded-2xl border p-4 ${qualityOk ? 'border-emerald-200 bg-emerald-50/80' : 'border-rose-200 bg-rose-50/80'}`}>
+        {qualityOk ? <ShieldCheck size={17} className="text-emerald-600 shrink-0 mt-0.5" /> : <AlertTriangle size={17} className="text-rose-600 shrink-0 mt-0.5" />}
+        <div>
+          <div className={`text-[11px] font-mono-data font-bold ${qualityOk ? 'text-emerald-900' : 'text-rose-900'}`}>Heuristic input warning: {qualityLabel}</div>
+          <div className="mt-1 text-[9px] font-mono-data text-slate-600">Input-field completeness {completeness.toFixed(1)}% · flag {patient.quality_flag.replace(/_/g, ' ')}</div>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+        {fields.map(([label, value]) => (
+          <div key={label} className="rounded-2xl bg-white/60 border border-slate-200/60 p-3.5 min-w-0">
+            <div className="text-[9px] uppercase tracking-wider font-mono-data font-bold text-slate-400">{label}</div>
+            <div className="mt-1 text-[11px] font-mono-data font-bold text-slate-700 break-all">{value}</div>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50/80 p-4">
+        <AlertTriangle size={17} className="text-amber-600 shrink-0 mt-0.5" />
+        <p className="text-[11px] leading-relaxed text-amber-900 font-mono-data">
+          <strong>Research-use limitation:</strong> this is a synthetic/demo record and an experimental UI output. Input completeness and quality flags are simple field/boundary checks—not empirical OOD detection, model abstention, medical advice, or evidence for diagnosis or treatment.
+        </p>
+      </div>
+    </GlassCard>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Immutable model history
+// ─────────────────────────────────────────────────────────────────────────────
+function ModelHistoryCard({ runs, error }: { runs: PredictionRun[]; error: string | null }) {
+  return (
+    <GlassCard className="rounded-3xl p-5">
+      <ModuleHeader icon={History} title="Model & Version History" subtitle="Immutable Synthetic Prediction Runs" accent="violet" />
+      {error ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-4 text-[11px] text-amber-900 font-mono-data">
+          Prediction history is unavailable: {error}
+        </div>
+      ) : runs.length === 0 ? (
+        <div className="rounded-2xl border border-slate-200 bg-white/60 p-4 text-[11px] text-slate-500 font-mono-data">
+          No immutable prediction snapshots are available for this legacy demo record yet.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {runs.map((run, index) => {
+            const outputs = run.outputs as { surrogateScore?: number; variationStd?: number; day1095DemoSurvival?: number };
+            return (
+              <div key={run.id} className="rounded-2xl border border-slate-200/60 bg-white/60 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] font-mono-data font-bold text-slate-800">{run.model_version}</div>
+                    <div className="mt-1 text-[9px] font-mono-data text-slate-400">{run.schema_version} · {run.prediction_run_id}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[9px] uppercase tracking-wider font-mono-data font-bold text-violet-600">{index === 0 ? 'Latest run' : `Prior run ${index}`}</div>
+                    <div className="text-[9px] font-mono-data text-slate-400">{format(new Date(run.created_at), 'MMM d, yyyy · HH:mm:ss')}</div>
+                  </div>
+                </div>
+                <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px] font-mono-data">
+                  <span>Input fields <strong>{run.data_completeness.toFixed(1)}%</strong></span>
+                  <span>Heuristic flag <strong>{run.quality_flag.replace(/_/g, ' ')}</strong></span>
+                  <span>Surrogate <strong>{typeof outputs.surrogateScore === 'number' ? outputs.surrogateScore.toFixed(3) : '—'}</strong></span>
+                  <span>Day 1095 demo <strong>{typeof outputs.day1095DemoSurvival === 'number' ? `${outputs.day1095DemoSurvival.toFixed(1)}%` : '—'}</strong></span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </GlassCard>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main Page
 // ─────────────────────────────────────────────────────────────────────────────
 export default function PatientDetail() {
@@ -823,6 +915,8 @@ export default function PatientDetail() {
   const navigate = useNavigate();
 
   const [patient, setPatient] = useState<PatientRecord | null>(null);
+  const [predictionRuns, setPredictionRuns] = useState<PredictionRun[]>([]);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -836,19 +930,22 @@ export default function PatientDetail() {
       }
       setLoading(true);
       setError(null);
-      const { data, error: dbError } = await supabase
-        .from('patients')
-        .select('*')
-        .eq('id', id)
-        .single();
+      setHistoryError(null);
+      const [patientResponse, historyResponse] = await Promise.all([
+        supabase.from('patients').select(PATIENT_COLUMNS).eq('id', id).is('deleted_at', null).single(),
+        supabase.from('prediction_runs')
+          .select('id,prediction_run_id,patient_id,patient_code,model_version,schema_version,data_completeness,quality_flag,inputs,outputs,synthetic_data,created_at')
+          .eq('patient_id', id).order('created_at', { ascending: false }).limit(50),
+      ]);
 
       if (cancelled) return;
-
-      if (dbError || !data) {
-        setError(dbError?.message || `Patient with ID ${id} was not found in the federated cohort.`);
+      if (patientResponse.error || !patientResponse.data) {
+        setError(patientResponse.error?.message || `Synthetic record ${id} was not found.`);
         setPatient(null);
       } else {
-        setPatient(data as PatientRecord);
+        setPatient(patientResponse.data as unknown as PatientRecord);
+        setPredictionRuns((historyResponse.data ?? []) as unknown as PredictionRun[]);
+        setHistoryError(historyResponse.error?.message ?? null);
       }
       setLoading(false);
     }
@@ -856,10 +953,10 @@ export default function PatientDetail() {
     return () => { cancelled = true; };
   }, [id]);
 
-  // Reconstruct survival curve from stored mean_hazard
+  // Reconstruct the stored synthetic UI curve from the saved surrogate score.
   const curve = useMemo(() => {
     if (!patient) return [];
-    return generateSurvivalCurve(patient.mean_hazard, patient.uncertainty_std);
+    return generateSurvivalCurve(patient.surrogate_score, patient.variation_std);
   }, [patient]);
 
   const medianDay = patient?.median_os ?? null;
@@ -876,7 +973,7 @@ export default function PatientDetail() {
         curve: result.curve,
         medianDay: result.medianDay,
         s1095: result.s1095,
-        meanHazard: result.meanHazard,
+        surrogateScore: result.meanSurrogateScore,
         color: colors[i],
       };
     });
@@ -905,20 +1002,7 @@ export default function PatientDetail() {
   }, [patient]);
 
   return (
-    <div className="min-h-screen mesh-bg text-slate-800 relative overflow-x-hidden">
-      {/* Ambient orbs */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <motion.div
-          animate={{ x: [0, 40, 0], y: [0, -30, 0] }}
-          transition={{ duration: 20, repeat: Infinity, ease: 'easeInOut' }}
-          className="absolute top-[10%] left-[15%] w-[400px] h-[400px] bg-blue-300/20 rounded-full blur-[100px]"
-        />
-        <motion.div
-          animate={{ x: [0, -50, 0], y: [0, 40, 0] }}
-          transition={{ duration: 25, repeat: Infinity, ease: 'easeInOut' }}
-          className="absolute bottom-[15%] right-[12%] w-[350px] h-[350px] bg-violet-300/15 rounded-full blur-[100px]"
-        />
-      </div>
+    <div className="min-h-screen text-slate-800 relative overflow-x-hidden">
 
       <div className="relative z-10 max-w-[1400px] mx-auto px-4 lg:px-6 py-6">
         {/* Back button */}
@@ -939,9 +1023,31 @@ export default function PatientDetail() {
           <PageHeader
             icon={UserCircle}
             title={patient.patient_code}
-            subtitle="Comprehensive Patient Profile · Digital Twin Analysis"
+            subtitle="Synthetic Research Profile · Experimental Model Output"
             accent="blue"
-          />
+          >
+            <motion.button
+              whileTap={{ scale: 0.97 }} whileHover={{ scale: 1.02 }}
+              onClick={() => {
+                const report = {
+                  reportType: 'synthetic-research-demo',
+                  generatedAt: new Date().toISOString(),
+                  disclaimer: 'Experimental synthetic/demo output only; not medical advice or for clinical decisions. No PHI or HIPAA compliance claim.',
+                  patient,
+                  predictionHistory: predictionRuns,
+                };
+                const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }));
+                const anchor = document.createElement('a');
+                anchor.href = url;
+                anchor.download = `${patient.patient_code}-synthetic-research-report.json`;
+                anchor.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="px-4 py-2.5 rounded-xl text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-colors flex items-center gap-2"
+            >
+              <Download size={14} /> Export JSON Report
+            </motion.button>
+          </PageHeader>
         )}
 
         {/* Body */}
@@ -959,6 +1065,14 @@ export default function PatientDetail() {
             {/* Hero */}
             <StaggerItem>
               <HeroSection patient={patient} curve={curve} medianDay={medianDay} />
+            </StaggerItem>
+
+            <StaggerItem>
+              <ProvenanceCard patient={patient} />
+            </StaggerItem>
+
+            <StaggerItem>
+              <ModelHistoryCard runs={predictionRuns} error={historyError} />
             </StaggerItem>
 
             {/* Clinical + Genomic */}

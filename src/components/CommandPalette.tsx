@@ -140,11 +140,11 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
       },
       {
         id: 'nav-simulator',
-        title: 'Go to Treatment Simulator',
-        subtitle: 'Navigation · Therapy modeling',
+        title: 'Go to Scenario Explorer',
+        subtitle: 'Navigation · Non-causal sensitivity scenarios',
         category: 'Navigation',
         icon: GitCompare,
-        keywords: 'treatment simulator therapy modeling compare',
+        keywords: 'scenario explorer sensitivity research demo compare',
         perform: closeAnd(() => navigate('/simulator')),
       },
       {
@@ -174,12 +174,12 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
       },
       {
         id: 'action-run-simulation',
-        title: 'Run Treatment Simulation',
-        subtitle: 'Action · Launch simulator',
+        title: 'Open Scenario Explorer',
+        subtitle: 'Action · Non-causal demo sensitivity view',
         category: 'Actions',
         icon: Activity,
         shortcut: 'R',
-        keywords: 'run treatment simulation launch execute',
+        keywords: 'run scenario explorer sensitivity demo',
         perform: closeAnd(() => navigate('/simulator')),
       },
       {
@@ -203,7 +203,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
         keywords: 'about aegisonco what is help info',
         perform: closeAnd(() =>
           pushToast(
-            'AegisOnco is a HIPAA-validated oncology digital-twin platform for federated learning, genomics, and treatment simulation.',
+            'AegisOnco is a synthetic-data research UI for exploring federated-learning, genomics, and non-causal scenario concepts. It is not clinically validated or intended for medical decisions.',
             'info',
           ),
         ),

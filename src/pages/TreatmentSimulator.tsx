@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   GitCompare, Activity, ShieldCheck, AlertTriangle, TrendingUp,
-  Zap, FlaskConical, CheckCircle2, ArrowRight, BarChart3,
+  Zap, FlaskConical, BarChart3,
 } from 'lucide-react';
 import {
   ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid,
@@ -74,7 +74,10 @@ const THEME_ORDER: InterventionTheme[] = [THEMES.standard, THEMES.targeted, THEM
 // ─────────────────────────────────────────────────────────────────────────────
 // Custom tooltip for an individual intervention curve
 // ─────────────────────────────────────────────────────────────────────────────
-function CurveTooltip({ active, payload, theme }: { active?: boolean; payload?: any[]; theme: InterventionTheme }) {
+interface CurveTooltipEntry { payload?: CurvePoint }
+interface OverlayTooltipEntry { dataKey?: string | number; value?: string | number }
+
+function CurveTooltip({ active, payload, theme }: { active?: boolean; payload?: CurveTooltipEntry[]; theme: InterventionTheme }) {
   if (!active || !payload?.length) return null;
   const p = payload[0]?.payload as CurvePoint;
   if (!p) return null;
@@ -91,7 +94,7 @@ function CurveTooltip({ active, payload, theme }: { active?: boolean; payload?: 
         <span className={`font-mono-data text-[13px] font-bold ${a.text}`}>{p.survival.toFixed(2)}%</span>
       </div>
       <div className="flex items-center justify-between gap-6">
-        <span className="text-[11px] text-slate-500">95% CI</span>
+        <span className="text-[11px] text-slate-500">Simulation range</span>
         <span className="font-mono-data text-[12px] text-slate-600">{p.range[0].toFixed(1)}–{p.range[1].toFixed(1)}%</span>
       </div>
     </div>
@@ -101,7 +104,7 @@ function CurveTooltip({ active, payload, theme }: { active?: boolean; payload?: 
 // ─────────────────────────────────────────────────────────────────────────────
 // Overlay tooltip — shows all three interventions at a given day
 // ─────────────────────────────────────────────────────────────────────────────
-function OverlayTooltip({ active, payload, label }: { active?: boolean; payload?: any[]; label?: number }) {
+function OverlayTooltip({ active, payload, label }: { active?: boolean; payload?: OverlayTooltipEntry[]; label?: number }) {
   if (!active || !payload?.length) return null;
   return (
     <div className="glass-card rounded-xl px-4 py-3 min-w-[240px]">
@@ -218,35 +221,31 @@ export default function TreatmentSimulator() {
     }));
   }, [results]);
 
-  // ── Hazard reduction table: deltas relative to Standard Clinical Routine ──
-  const hazardTable = useMemo(() => {
-    const baseline = results.standard.meanHazard;
+  // ── Surrogate-score sensitivity table: deltas relative to the reference scenario ──
+  const scoreTable = useMemo(() => {
+    const baseline = results.standard.meanSurrogateScore;
     return THEME_ORDER.map((theme) => {
       const r = results[theme.key];
-      const delta = r.meanHazard - baseline;
-      const pctImprovement = baseline !== 0 ? (Math.abs(delta) / Math.abs(baseline)) * 100 : 0;
-      // Approximate 95% CI for the delta: ±1.96 * sqrt(σ_a^2 + σ_b^2)
-      const ciWidth = 1.96 * Math.sqrt(r.uncertaintyStd ** 2 + results.standard.uncertaintyStd ** 2);
+      const delta = r.meanSurrogateScore - baseline;
+      const relativeMagnitude = baseline !== 0 ? (Math.abs(delta) / Math.abs(baseline)) * 100 : 0;
+      const variationBand = 1.96 * Math.sqrt(r.variationStd ** 2 + results.standard.variationStd ** 2);
       return {
         theme,
-        meanHazard: r.meanHazard,
+        surrogateScore: r.meanSurrogateScore,
         delta,
-        pctImprovement,
-        ciLow: delta - ciWidth,
-        ciHigh: delta + ciWidth,
-        uncertainty: r.uncertaintyStd,
+        relativeMagnitude,
+        variabilityLow: delta - variationBand,
+        variabilityHigh: delta + variationBand,
+        variation: r.variationStd,
       };
     });
   }, [results]);
 
-  // ── Recommendation: lowest mean hazard with acceptable uncertainty (σ ≤ 0.8) ──
-  const recommendation = useMemo(() => {
-    const ranked = [...THEME_ORDER].sort((a, b) => results[a.key].meanHazard - results[b.key].meanHazard);
-    const best = ranked[0];
-    const bestResult = results[best.key];
-    const acceptable = bestResult.uncertaintyStd <= 0.8;
-    // If the best by hazard has unacceptable uncertainty, flag it but still recommend it
-    return { theme: best, result: bestResult, acceptable, ranked };
+  const scenarioOrdering = useMemo(() => {
+    const ordered = [...THEME_ORDER].sort((a, b) => results[a.key].meanSurrogateScore - results[b.key].meanSurrogateScore);
+    const first = ordered[0];
+    const firstResult = results[first.key];
+    return { first, firstResult, ordered, highVariation: firstResult.variationStd > 0.8 };
   }, [results]);
 
   return (
@@ -254,21 +253,25 @@ export default function TreatmentSimulator() {
       {/* ── Page Header ── */}
       <PageHeader
         icon={GitCompare}
-        title="Treatment Simulator"
-        subtitle="Counterfactual Intervention Analysis · Comparative Outcomes"
+        title="Scenario Explorer"
+        subtitle="Non-Causal Sensitivity Demo · Arbitrary UI Surrogate Offsets"
         accent="amber"
       >
         <div className="flex items-center gap-2.5 flex-wrap">
           <div className="glass-card rounded-xl px-3.5 py-2 flex items-center gap-2">
             <FlaskConical className="text-amber-600" size={14} />
-            <span className="text-[9px] uppercase tracking-wider text-amber-700 font-bold">Counterfactual Mode</span>
+            <span className="text-[9px] uppercase tracking-wider text-amber-700 font-bold">Research Demo Only</span>
           </div>
-          <div className="glass-card-emerald rounded-xl px-3.5 py-2 flex items-center gap-2 glow-emerald">
+          <div className="glass-card-emerald rounded-xl px-3.5 py-2 flex items-center gap-2">
             <ShieldCheck className="text-emerald-600" size={14} />
-            <span className="text-[9px] uppercase tracking-wider text-emerald-700 font-bold">3-Arm Comparison</span>
+            <span className="text-[9px] uppercase tracking-wider text-emerald-700 font-bold">No Treatment Effect Estimate</span>
           </div>
         </div>
       </PageHeader>
+
+      <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-[11px] leading-relaxed text-amber-900 font-mono-data">
+        <strong>Non-causal sensitivity view:</strong> these curves come from a deterministic browser surrogate with hand-authored offsets—not notebook weights, clinical evidence, or a treatment model. Do not use them for diagnosis, prognosis, or therapy selection.
+      </div>
 
       {/* ─────────────────────────────────────────────────────────────────── */}
       {/* Shared Patient Profile — compact horizontal controls                 */}
@@ -277,7 +280,7 @@ export default function TreatmentSimulator() {
         initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
         whileHover={{ y: -2 }} className="glass-card rounded-3xl p-5 mb-5"
       >
-        <ModuleHeader icon={Activity} title="Shared Patient Profile" subtitle="Counterfactual Baseline · Applied to All 3 Arms" accent="amber" />
+        <ModuleHeader icon={Activity} title="Shared Synthetic Profile" subtitle="Identical Demo Inputs · Applied to All 3 Scenarios" accent="amber" />
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-x-6 gap-y-4">
           {/* Column 1 — Clinical metadata */}
@@ -296,7 +299,7 @@ export default function TreatmentSimulator() {
             </div>
             <div>
               <label className="text-[11px] text-slate-500 font-semibold tracking-wide block mb-2">Complete Staging Workup?</label>
-              <SegmentedControl options={['Yes', 'No'] as any} value={hasFullStaging ? 'Yes' : 'No'} onChange={(v) => setHasFullStaging(v === 'Yes')} columns={2} />
+              <SegmentedControl<'Yes' | 'No'> options={['Yes', 'No']} value={hasFullStaging ? 'Yes' : 'No'} onChange={(v) => setHasFullStaging(v === 'Yes')} columns={2} />
             </div>
           </div>
 
@@ -371,23 +374,18 @@ export default function TreatmentSimulator() {
 
               {/* Key metrics */}
               <div className="grid grid-cols-2 gap-2.5 mt-4">
-                <MetricCell label="Mean Hazard" value={r.meanHazard.toFixed(4)} accent={theme.accent} />
-                <MetricCell label="Uncertainty σ" value={r.uncertaintyStd.toFixed(4)} accent={r.uncertaintyStd > 0.8 ? 'rose' : theme.accent} danger={r.uncertaintyStd > 0.8} />
-                <MetricCell label="Median OS" value={r.medianDay !== null ? `${r.medianDay} d` : '> 2000 d'} accent={theme.accent} />
+                <MetricCell label="Surrogate Score" value={r.meanSurrogateScore.toFixed(4)} accent={theme.accent} />
+                <MetricCell label="Seeded Variation σ" value={r.variationStd.toFixed(4)} accent={r.variationStd > 0.8 ? 'rose' : theme.accent} danger={r.variationStd > 0.8} />
+                <MetricCell label="Demo Median Day" value={r.medianDay !== null ? `${r.medianDay} d` : '> 2000 d'} accent={theme.accent} />
                 <MetricCell label="Day 1095 Surv." value={`${r.s1095.toFixed(1)}%`} accent={theme.accent} />
               </div>
 
-              {/* Uncertainty flag */}
+              {/* Seeded variation flag */}
               <div className="mt-3 flex items-center justify-center gap-1.5 text-[10px] font-semibold">
-                {r.uncertaintyStd > 0.8 ? (
-                  <span className="flex items-center gap-1.5 text-rose-500">
-                    <AlertTriangle size={12} /> High uncertainty — verify pathology
-                  </span>
-                ) : (
-                  <span className={`flex items-center gap-1.5 ${a.text}`}>
-                    <CheckCircle2 size={12} /> Confidence bounds verified
-                  </span>
-                )}
+                <span className={`flex items-center gap-1.5 ${r.variationStd > 0.8 ? 'text-rose-500' : a.text}`}>
+                  {r.variationStd > 0.8 && <AlertTriangle size={12} />}
+                  {r.variationStd > 0.8 ? 'High demo variation' : 'Demo variation below display threshold'}
+                </span>
               </div>
             </motion.section>
           );
@@ -409,7 +407,7 @@ export default function TreatmentSimulator() {
             <div>
               <h2 className="text-[15px] font-bold text-slate-800">Overlay Survival Comparison</h2>
               <p className="text-[10px] text-slate-400 font-mono-data uppercase tracking-[0.15em] mt-0.5">
-                All 3 Interventions · Same Patient Profile · Counterfactual Overlay
+                Three Arbitrary Scenarios · Same Synthetic Profile · Non-Causal Overlay
               </p>
             </div>
           </div>
@@ -465,7 +463,7 @@ export default function TreatmentSimulator() {
       </motion.section>
 
       {/* ─────────────────────────────────────────────────────────────────── */}
-      {/* Hazard reduction table                                              */}
+      {/* Surrogate-score sensitivity table */}
       {/* ─────────────────────────────────────────────────────────────────── */}
       <motion.section
         initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.36, ease: 'easeOut' }}
@@ -476,9 +474,9 @@ export default function TreatmentSimulator() {
             <TrendingUp className="text-violet-600" size={18} />
           </div>
           <div>
-            <h2 className="text-[15px] font-bold text-slate-800">Hazard Reduction Matrix</h2>
+            <h2 className="text-[15px] font-bold text-slate-800">Surrogate Score Sensitivity</h2>
             <p className="text-[10px] text-slate-400 font-mono-data uppercase tracking-[0.15em] mt-0.5">
-              Δ Log-Hazard vs. Standard Clinical Routine · 95% Confidence Intervals
+              Δ Demo Score vs. Reference · Simulation Variation Range
             </p>
           </div>
         </div>
@@ -488,18 +486,18 @@ export default function TreatmentSimulator() {
             <thead>
               <tr className="border-b border-slate-200/70">
                 <th className="py-3 px-3 text-[9px] text-slate-400 uppercase tracking-[0.15em] font-bold font-mono-data">Intervention</th>
-                <th className="py-3 px-3 text-[9px] text-slate-400 uppercase tracking-[0.15em] font-bold font-mono-data text-right">Mean Hazard</th>
+                <th className="py-3 px-3 text-[9px] text-slate-400 uppercase tracking-[0.15em] font-bold font-mono-data text-right">Surrogate Score</th>
                 <th className="py-3 px-3 text-[9px] text-slate-400 uppercase tracking-[0.15em] font-bold font-mono-data text-right">Δ vs. Standard</th>
-                <th className="py-3 px-3 text-[9px] text-slate-400 uppercase tracking-[0.15em] font-bold font-mono-data text-right">Improvement</th>
-                <th className="py-3 px-3 text-[9px] text-slate-400 uppercase tracking-[0.15em] font-bold font-mono-data text-right">95% CI (Δ)</th>
+                <th className="py-3 px-3 text-[9px] text-slate-400 uppercase tracking-[0.15em] font-bold font-mono-data text-right">Absolute change</th>
+                <th className="py-3 px-3 text-[9px] text-slate-400 uppercase tracking-[0.15em] font-bold font-mono-data text-right">Variation range</th>
                 <th className="py-3 px-3 text-[9px] text-slate-400 uppercase tracking-[0.15em] font-bold font-mono-data text-right">σ</th>
               </tr>
             </thead>
             <tbody>
-              {hazardTable.map((row, i) => {
+              {scoreTable.map((row, i) => {
                 const a = ACCENT[row.theme.accent];
                 const isBaseline = row.theme.key === 'standard';
-                const beneficial = row.delta < 0;
+                const lowerScore = row.delta < 0;
                 return (
                   <motion.tr
                     key={row.theme.key}
@@ -517,27 +515,26 @@ export default function TreatmentSimulator() {
                       </div>
                     </td>
                     <td className="py-3.5 px-3 text-right font-mono-data text-[12px] text-slate-700 font-bold">
-                      {row.meanHazard.toFixed(4)}
+                      {row.surrogateScore.toFixed(4)}
                     </td>
-                    <td className={`py-3.5 px-3 text-right font-mono-data text-[12px] font-bold ${isBaseline ? 'text-slate-400' : beneficial ? 'text-emerald-600' : 'text-rose-500'}`}>
+                    <td className={`py-3.5 px-3 text-right font-mono-data text-[12px] font-bold ${isBaseline ? 'text-slate-400' : lowerScore ? 'text-violet-600' : 'text-amber-700'}`}>
                       {isBaseline ? '—' : (row.delta >= 0 ? '+' : '') + row.delta.toFixed(4)}
                     </td>
                     <td className="py-3.5 px-3 text-right">
                       {isBaseline ? (
                         <span className="text-slate-400 font-mono-data text-[12px]">—</span>
                       ) : (
-                        <span className={`inline-flex items-center gap-1 font-mono-data text-[12px] font-bold ${beneficial ? 'text-emerald-600' : 'text-rose-500'}`}>
-                          {beneficial ? <TrendingUp size={11} /> : <AlertTriangle size={11} />}
-                          {row.pctImprovement.toFixed(1)}%
+                        <span className="font-mono-data text-[12px] font-bold text-slate-600">
+                          {row.relativeMagnitude.toFixed(1)}%
                         </span>
                       )}
                     </td>
                     <td className="py-3.5 px-3 text-right font-mono-data text-[11px] text-slate-500">
-                      {isBaseline ? '—' : `[${row.ciLow.toFixed(3)}, ${row.ciHigh.toFixed(3)}]`}
+                      {isBaseline ? '—' : `[${row.variabilityLow.toFixed(3)}, ${row.variabilityHigh.toFixed(3)}]`}
                     </td>
                     <td className="py-3.5 px-3 text-right">
-                      <span className={`font-mono-data text-[12px] font-bold ${row.uncertainty > 0.8 ? 'text-rose-500' : row.uncertainty > 0.5 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                        {row.uncertainty.toFixed(3)}
+                      <span className={`font-mono-data text-[12px] font-bold ${row.variation > 0.8 ? 'text-rose-500' : row.variation > 0.5 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                        {row.variation.toFixed(3)}
                       </span>
                     </td>
                   </motion.tr>
@@ -550,108 +547,44 @@ export default function TreatmentSimulator() {
         <div className="mt-4 flex items-start gap-2 text-[10px] text-slate-400 font-mono-data">
           <AlertTriangle size={12} className="text-amber-500 mt-0.5 shrink-0" />
           <span>
-            Negative Δ indicates hazard reduction (benefit) relative to the Standard Clinical Routine baseline.
-            CI width derived from combined epistemic uncertainty of both arms (±1.96 · √(σ²ₐ + σ²ᵦ)).
+            Negative Δ means only that the arbitrary demo offset lowered this browser surrogate score. It does not indicate treatment benefit. The displayed range is a seeded simulation variation band, not a confidence interval.
           </span>
         </div>
       </motion.section>
 
-      {/* ─────────────────────────────────────────────────────────────────── */}
-      {/* Recommendation card                                                */}
-      {/* ─────────────────────────────────────────────────────────────────── */}
+      {/* Descriptive sensitivity ordering — never a treatment recommendation. */}
       <motion.section
         initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.44, ease: 'easeOut' }}
-        whileHover={{ y: -2 }}
-        className={`rounded-3xl p-6 mb-5 ${recommendation.theme.headerClass}`}
+        className="glass-card-amber rounded-3xl p-6 mb-5"
       >
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <motion.div
-              initial={{ scale: 0.7, rotate: -12 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: 'spring', stiffness: 300, damping: 18 }}
-              className={`w-12 h-12 rounded-2xl ${ACCENT[recommendation.theme.accent].bgSoft} ${ACCENT[recommendation.theme.accent].border} border flex items-center justify-center shrink-0`}
-            >
-              <CheckCircle2 className={ACCENT[recommendation.theme.accent].text} size={24} />
-            </motion.div>
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className={`text-[9px] uppercase tracking-[0.18em] font-mono-data font-bold ${ACCENT[recommendation.theme.accent].text}`}>
-                  Projected Optimal Arm
-                </span>
-                <ArrowRight size={12} className={ACCENT[recommendation.theme.accent].text} />
-              </div>
-              <h2 className={`text-[18px] font-extrabold tracking-tight ${ACCENT[recommendation.theme.accent].text}`}>
-                {recommendation.theme.label}
-              </h2>
-              <p className="text-[11px] text-slate-500 mt-1 max-w-xl leading-relaxed">
-                Based on counterfactual simulation across the shared patient profile, this intervention
-                projects the lowest mean log-hazard (
-                <span className={`font-mono-data font-bold ${ACCENT[recommendation.theme.accent].text}`}>
-                  {recommendation.result.meanHazard.toFixed(4)}
-                </span>
-                ) with a Day-1095 survival of{' '}
-                <span className={`font-mono-data font-bold ${ACCENT[recommendation.theme.accent].text}`}>
-                  {recommendation.result.s1095.toFixed(1)}%
-                </span>{' '}
-                and median OS of{' '}
-                <span className={`font-mono-data font-bold ${ACCENT[recommendation.theme.accent].text}`}>
-                  {recommendation.result.medianDay !== null ? `${recommendation.result.medianDay} days` : '> 2000 days'}
-                </span>.
-              </p>
-            </div>
+        <div className="flex items-start gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center shrink-0">
+            <AlertTriangle className="text-amber-600" size={24} />
           </div>
-
-          <div className="flex flex-col items-end gap-2">
-            {recommendation.acceptable ? (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200">
-                <ShieldCheck className="text-emerald-600" size={13} />
-                <span className="text-[10px] text-emerald-700 font-bold uppercase tracking-wider">Uncertainty Acceptable</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-rose-50 border border-rose-200">
-                <AlertTriangle className="text-rose-500" size={13} />
-                <span className="text-[10px] text-rose-600 font-bold uppercase tracking-wider">High Uncertainty — Verify</span>
-              </div>
-            )}
-            <span className="text-[9px] text-slate-400 font-mono-data uppercase tracking-wider">
-              σ = {recommendation.result.uncertaintyStd.toFixed(4)}
-            </span>
+          <div>
+            <div className="text-[9px] uppercase tracking-[0.18em] font-mono-data font-bold text-amber-700">Descriptive sensitivity ordering</div>
+            <h2 className="mt-1 text-[18px] font-extrabold tracking-tight text-slate-800">Not a treatment recommendation</h2>
+            <p className="mt-2 max-w-3xl text-[11px] leading-relaxed text-slate-600">
+              The browser surrogate applies arbitrary, hand-authored offsets to illustrate interface behavior. It has no causal treatment model and cannot estimate benefit, select therapy, or support a medical decision. In this demo calculation only, <strong>{scenarioOrdering.first.label}</strong> produces the lowest numeric surrogate score ({scenarioOrdering.firstResult.meanSurrogateScore.toFixed(4)}).
+            </p>
           </div>
         </div>
-
-        {/* Ranking summary */}
-        <div className="mt-5 pt-5 border-t border-slate-200/60">
-          <div className="text-[9px] text-slate-400 uppercase tracking-[0.15em] font-mono-data font-bold mb-3">Projected Outcome Ranking</div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {recommendation.ranked.map((theme, i) => {
-              const r = results[theme.key];
-              const a = ACCENT[theme.accent];
-              return (
-                <motion.div
-                  key={theme.key}
-                  initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.5 + i * 0.08 }}
-                  className={`p-3.5 rounded-2xl border ${i === 0 ? `${a.border} ${a.bgSoft}` : 'border-slate-200/60 bg-white/50'}`}
-                >
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full" style={{ background: theme.line }} />
-                      <span className={`text-[11px] font-bold ${i === 0 ? a.text : 'text-slate-600'}`}>{theme.shortLabel}</span>
-                    </span>
-                    <span className={`text-[9px] font-mono-data font-bold ${i === 0 ? a.text : 'text-slate-400'}`}>
-                      Rank #{i + 1}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-[10px] font-mono-data">
-                    <span className="text-slate-400">Hazard</span>
-                    <span className={`font-bold ${i === 0 ? a.text : 'text-slate-600'}`}>{r.meanHazard.toFixed(4)}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-[10px] font-mono-data mt-1">
-                    <span className="text-slate-400">Day 1095</span>
-                    <span className={`font-bold ${i === 0 ? a.text : 'text-slate-600'}`}>{r.s1095.toFixed(1)}%</span>
-                  </div>
-                </motion.div>
-              );
-            })}
-          </div>
+        <div className="mt-5 grid grid-cols-1 gap-3 border-t border-slate-200/60 pt-5 md:grid-cols-3">
+          {scenarioOrdering.ordered.map((theme, index) => {
+            const result = results[theme.key];
+            return (
+              <div key={theme.key} className="rounded-2xl border border-slate-200/60 bg-white/50 p-3.5">
+                <div className="flex items-center justify-between text-[10px] font-mono-data">
+                  <span className="font-bold text-slate-700">{theme.shortLabel}</span>
+                  <span className="text-slate-400">Demo order {index + 1}</span>
+                </div>
+                <div className="mt-2 flex items-center justify-between text-[10px] font-mono-data">
+                  <span className="text-slate-400">Surrogate score</span>
+                  <span className="font-bold text-slate-600">{result.meanSurrogateScore.toFixed(4)}</span>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </motion.section>
 
@@ -659,43 +592,14 @@ export default function TreatmentSimulator() {
       {/* Footer KPIs                                                        */}
       {/* ─────────────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <KpiCard
-          icon={GitCompare}
-          label="Arms Compared"
-          value="3"
-          sub="Counterfactual intervention pathways"
-          accent="amber"
-        />
-        <KpiCard
-          icon={TrendingUp}
-          label="Best Δ Hazard"
-          value={`${Math.min(...THEME_ORDER.filter((t) => t.key !== 'standard').map((t) => results[t.key].meanHazard - results.standard.meanHazard)).toFixed(3)}`}
-          sub="Reduction vs. standard baseline"
-          accent="emerald"
-        />
-        <KpiCard
-          icon={ShieldCheck}
-          label="Confidence"
-          value={recommendation.acceptable ? 'Verified' : 'Caution'}
-          sub={recommendation.acceptable ? 'Uncertainty within tolerance' : 'Epistemic limit flagged'}
-          danger={!recommendation.acceptable}
-          accent="emerald"
-        />
+        <KpiCard icon={GitCompare} label="Scenarios Compared" value="3" sub="Arbitrary non-causal offsets" accent="amber" />
+        <KpiCard icon={TrendingUp} label="Score Spread" value={(Math.max(...THEME_ORDER.map((t) => results[t.key].meanSurrogateScore)) - Math.min(...THEME_ORDER.map((t) => results[t.key].meanSurrogateScore))).toFixed(3)} sub="Descriptive surrogate variation" accent="violet" />
+        <KpiCard icon={ShieldCheck} label="Use Boundary" value="Research only" sub={scenarioOrdering.highVariation ? 'High simulation variation flagged' : 'No clinical interpretation'} danger={scenarioOrdering.highVariation} accent="emerald" />
       </div>
 
-      {/* Footer */}
       <footer className="mt-8 flex flex-wrap items-center justify-between gap-3 text-[9px] text-slate-400 font-mono-data uppercase tracking-[0.15em] pb-4">
-        <div className="flex items-center gap-2">
-          <GitCompare size={11} className="text-amber-500" />
-          <span>AegisOnco DTC · Counterfactual Treatment Simulator</span>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1"><Activity size={10} className="text-amber-500" /> Cox PH · MC Dropout</span>
-          <span>·</span>
-          <span className="flex items-center gap-1"><ShieldCheck size={10} className="text-emerald-500" /> Same Profile · 3 Arms</span>
-          <span>·</span>
-          <span>Synthetic Data — No PHI Transmitted</span>
-        </div>
+        <div className="flex items-center gap-2"><GitCompare size={11} className="text-amber-500" /><span>AegisOnco · Non-Causal Scenario Explorer</span></div>
+        <span>Deterministic UI Surrogate · Synthetic Data · No PHI · Not Medical Advice</span>
       </footer>
     </div>
   );
